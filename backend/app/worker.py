@@ -18,8 +18,9 @@ import cv2
 import numpy as np
 import websockets
 
-from app.models import StreamConfig
+from app.models import StreamConfig, TranscriptCreate
 from app.processors import FrameProcessor, MjpegStreamer, SnapshotProcessor
+from app.services.transcript_service import transcript_service
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +435,7 @@ class StreamWorker:
             await asyncio.sleep(0.01)
 
     async def _receive_transcripts(self, ws) -> None:
-        """Receive transcripts from WhisperLive."""
+        """Receive transcripts from WhisperLive and persist to database."""
         while not self._stop_event.is_set():
             try:
                 message = await asyncio.wait_for(ws.recv(), timeout=1.0)
@@ -449,13 +450,24 @@ class StreamWorker:
                         is_final=data.get("is_final", False)
                     )
 
+                    # Keep in-memory buffer for real-time display
                     with self._transcript_lock:
                         self._transcript_segments.append(segment)
-                        # Keep only last 100 segments
+                        # Keep only last 100 segments in memory
                         if len(self._transcript_segments) > 100:
                             self._transcript_segments = self._transcript_segments[-100:]
 
                     self._status.last_transcript = segment.text
+
+                    # Persist final transcripts to database
+                    if segment.is_final and segment.text.strip():
+                        transcript_service.add(TranscriptCreate(
+                            stream_id=self.config.id,
+                            text=segment.text,
+                            start_time=segment.start_time,
+                            end_time=segment.end_time,
+                            is_final=True,
+                        ))
 
                     # Callback for real-time updates
                     if self.on_transcript:
@@ -466,3 +478,6 @@ class StreamWorker:
             except Exception as e:
                 logger.error(f"Error receiving transcript: {e}")
                 break
+
+        # Flush any pending transcripts when connection ends
+        transcript_service.flush()

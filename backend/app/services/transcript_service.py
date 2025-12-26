@@ -1,0 +1,206 @@
+"""Transcript persistence service for TheWallflower."""
+
+import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from sqlmodel import Session, select, col, func
+
+from app.db import engine
+from app.models import Transcript, TranscriptCreate
+
+logger = logging.getLogger(__name__)
+
+
+class TranscriptService:
+    """Service for managing transcript persistence."""
+
+    def __init__(self):
+        self._batch: List[TranscriptCreate] = []
+        self._batch_size = 10  # Flush after this many transcripts
+        self._last_flush = datetime.utcnow()
+        self._flush_interval = timedelta(seconds=5)  # Flush at least every 5 seconds
+
+    def add(self, transcript: TranscriptCreate) -> None:
+        """Add a transcript to the batch for persistence.
+
+        Transcripts are batched to reduce database writes.
+        Call flush() to force immediate persistence.
+        """
+        self._batch.append(transcript)
+
+        # Auto-flush if batch is full or interval exceeded
+        if (len(self._batch) >= self._batch_size or
+            datetime.utcnow() - self._last_flush > self._flush_interval):
+            self.flush()
+
+    def flush(self) -> int:
+        """Flush pending transcripts to database.
+
+        Returns:
+            Number of transcripts saved.
+        """
+        if not self._batch:
+            return 0
+
+        batch_to_save = self._batch
+        self._batch = []
+        self._last_flush = datetime.utcnow()
+
+        try:
+            with Session(engine) as session:
+                for tc in batch_to_save:
+                    transcript = Transcript(
+                        stream_id=tc.stream_id,
+                        text=tc.text,
+                        start_time=tc.start_time,
+                        end_time=tc.end_time,
+                        is_final=tc.is_final,
+                        confidence=tc.confidence,
+                        speaker_id=tc.speaker_id,
+                    )
+                    session.add(transcript)
+                session.commit()
+                logger.debug(f"Flushed {len(batch_to_save)} transcripts to database")
+                return len(batch_to_save)
+        except Exception as e:
+            logger.error(f"Failed to flush transcripts: {e}")
+            # Put failed transcripts back in batch for retry
+            self._batch = batch_to_save + self._batch
+            return 0
+
+    def get_by_stream(
+        self,
+        stream_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+        final_only: bool = False,
+    ) -> List[Transcript]:
+        """Get transcripts for a stream.
+
+        Args:
+            stream_id: The stream ID to get transcripts for
+            limit: Maximum number of transcripts to return
+            offset: Number of transcripts to skip
+            since: Only return transcripts after this time
+            until: Only return transcripts before this time
+            final_only: Only return final (not interim) transcripts
+
+        Returns:
+            List of transcripts, newest first
+        """
+        with Session(engine) as session:
+            statement = select(Transcript).where(Transcript.stream_id == stream_id)
+
+            if since:
+                statement = statement.where(Transcript.created_at >= since)
+            if until:
+                statement = statement.where(Transcript.created_at <= until)
+            if final_only:
+                statement = statement.where(Transcript.is_final == True)
+
+            statement = statement.order_by(col(Transcript.created_at).desc())
+            statement = statement.offset(offset).limit(limit)
+
+            return list(session.exec(statement).all())
+
+    def search(
+        self,
+        query: str,
+        stream_id: Optional[int] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Transcript]:
+        """Search transcripts by text content.
+
+        Args:
+            query: Search query (case-insensitive substring match)
+            stream_id: Optional stream ID to filter by
+            limit: Maximum results to return
+            offset: Number of results to skip
+
+        Returns:
+            List of matching transcripts, newest first
+        """
+        with Session(engine) as session:
+            statement = select(Transcript).where(
+                col(Transcript.text).contains(query)
+            )
+
+            if stream_id is not None:
+                statement = statement.where(Transcript.stream_id == stream_id)
+
+            statement = statement.order_by(col(Transcript.created_at).desc())
+            statement = statement.offset(offset).limit(limit)
+
+            return list(session.exec(statement).all())
+
+    def count_by_stream(self, stream_id: int) -> int:
+        """Get total transcript count for a stream."""
+        with Session(engine) as session:
+            statement = select(func.count(Transcript.id)).where(
+                Transcript.stream_id == stream_id
+            )
+            return session.exec(statement).one()
+
+    def cleanup_old(
+        self,
+        max_age_days: int = 30,
+        max_per_stream: Optional[int] = None,
+    ) -> int:
+        """Clean up old transcripts.
+
+        Args:
+            max_age_days: Delete transcripts older than this many days
+            max_per_stream: Keep only this many per stream (optional)
+
+        Returns:
+            Number of transcripts deleted
+        """
+        deleted = 0
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+
+        with Session(engine) as session:
+            # Delete by age
+            old_transcripts = session.exec(
+                select(Transcript).where(Transcript.created_at < cutoff)
+            ).all()
+
+            for t in old_transcripts:
+                session.delete(t)
+                deleted += 1
+
+            session.commit()
+
+        if deleted > 0:
+            logger.info(f"Cleaned up {deleted} old transcripts")
+
+        return deleted
+
+    def delete_by_stream(self, stream_id: int) -> int:
+        """Delete all transcripts for a stream.
+
+        Args:
+            stream_id: The stream ID to delete transcripts for
+
+        Returns:
+            Number of transcripts deleted
+        """
+        with Session(engine) as session:
+            transcripts = session.exec(
+                select(Transcript).where(Transcript.stream_id == stream_id)
+            ).all()
+
+            count = len(transcripts)
+            for t in transcripts:
+                session.delete(t)
+
+            session.commit()
+            logger.info(f"Deleted {count} transcripts for stream {stream_id}")
+            return count
+
+
+# Global singleton instance
+transcript_service = TranscriptService()

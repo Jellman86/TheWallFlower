@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -23,6 +23,8 @@ from app.models import (
 )
 from app.stream_manager import stream_manager
 from app.worker import StreamStatus
+from app.services.transcript_service import transcript_service
+from app.models import Transcript, TranscriptRead
 
 # Configure logging
 logging.basicConfig(
@@ -309,7 +311,11 @@ async def get_snapshot(stream_id: int):
 
 @app.get("/api/streams/{stream_id}/transcripts")
 def get_transcripts(stream_id: int, limit: int = 50) -> Dict[str, Any]:
-    """Get recent transcripts for a stream."""
+    """Get recent transcripts for a stream (real-time from memory).
+
+    For live/real-time transcripts while stream is running.
+    Use /api/transcripts for historical transcripts from database.
+    """
     worker = stream_manager.get_worker(stream_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Stream not found or not running")
@@ -328,6 +334,238 @@ def get_transcripts(stream_id: int, limit: int = 50) -> Dict[str, Any]:
         ],
         "count": len(transcripts),
     }
+
+
+@app.get("/api/transcripts")
+def get_transcripts_history(
+    stream_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Get historical transcripts from database.
+
+    Args:
+        stream_id: Filter by stream ID (optional)
+        limit: Maximum number of transcripts to return (default 50, max 500)
+        offset: Number of transcripts to skip for pagination
+        search: Search query to filter transcripts by text content
+
+    Returns:
+        Paginated list of transcripts with metadata
+    """
+    from typing import Optional as Opt
+
+    limit = min(limit, 500)  # Cap at 500
+
+    if search:
+        transcripts = transcript_service.search(
+            query=search,
+            stream_id=stream_id,
+            limit=limit,
+            offset=offset,
+        )
+    elif stream_id is not None:
+        transcripts = transcript_service.get_by_stream(
+            stream_id=stream_id,
+            limit=limit,
+            offset=offset,
+            final_only=True,
+        )
+    else:
+        # Get from all streams - need to implement this
+        from sqlmodel import select, col
+        from app.db import engine
+        with Session(engine) as session:
+            statement = select(Transcript).where(Transcript.is_final == True)
+            statement = statement.order_by(col(Transcript.created_at).desc())
+            statement = statement.offset(offset).limit(limit)
+            transcripts = list(session.exec(statement).all())
+
+    return {
+        "transcripts": [
+            {
+                "id": t.id,
+                "stream_id": t.stream_id,
+                "text": t.text,
+                "start_time": t.start_time,
+                "end_time": t.end_time,
+                "is_final": t.is_final,
+                "speaker_id": t.speaker_id,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in transcripts
+        ],
+        "count": len(transcripts),
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(transcripts) == limit,
+    }
+
+
+@app.get("/api/transcripts/export")
+def export_transcripts(
+    stream_id: int,
+    format: str = "json",
+) -> Any:
+    """Export all transcripts for a stream.
+
+    Args:
+        stream_id: Stream ID to export transcripts for
+        format: Export format - 'json', 'txt', 'srt', or 'vtt'
+
+    Returns:
+        Transcripts in the requested format
+    """
+    # Get all transcripts for this stream
+    transcripts = transcript_service.get_by_stream(
+        stream_id=stream_id,
+        limit=10000,  # Get all
+        final_only=True,
+    )
+
+    if format == "txt":
+        # Plain text format
+        content = "\n".join(t.text for t in reversed(transcripts))
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=transcripts_{stream_id}.txt"}
+        )
+
+    elif format == "srt":
+        # SubRip subtitle format
+        lines = []
+        for i, t in enumerate(reversed(transcripts), 1):
+            start_h, start_m = divmod(int(t.start_time), 3600), divmod(int(t.start_time) % 3600, 60)
+            start_s = t.start_time % 60
+            end_h, end_m = divmod(int(t.end_time), 3600), divmod(int(t.end_time) % 3600, 60)
+            end_s = t.end_time % 60
+
+            lines.append(str(i))
+            lines.append(
+                f"{start_h[0]:02d}:{start_m[0]:02d}:{start_s:06.3f}".replace(".", ",") +
+                " --> " +
+                f"{end_h[0]:02d}:{end_m[0]:02d}:{end_s:06.3f}".replace(".", ",")
+            )
+            lines.append(t.text)
+            lines.append("")
+
+        content = "\n".join(lines)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=transcripts_{stream_id}.srt"}
+        )
+
+    elif format == "vtt":
+        # WebVTT subtitle format
+        lines = ["WEBVTT", ""]
+        for t in reversed(transcripts):
+            start_h, start_m = divmod(int(t.start_time), 3600), divmod(int(t.start_time) % 3600, 60)
+            start_s = t.start_time % 60
+            end_h, end_m = divmod(int(t.end_time), 3600), divmod(int(t.end_time) % 3600, 60)
+            end_s = t.end_time % 60
+
+            lines.append(
+                f"{start_h[0]:02d}:{start_m[0]:02d}:{start_s:06.3f}" +
+                " --> " +
+                f"{end_h[0]:02d}:{end_m[0]:02d}:{end_s:06.3f}"
+            )
+            lines.append(t.text)
+            lines.append("")
+
+        content = "\n".join(lines)
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/vtt",
+            headers={"Content-Disposition": f"attachment; filename=transcripts_{stream_id}.vtt"}
+        )
+
+    else:
+        # JSON format (default)
+        return {
+            "stream_id": stream_id,
+            "transcripts": [
+                {
+                    "id": t.id,
+                    "text": t.text,
+                    "start_time": t.start_time,
+                    "end_time": t.end_time,
+                    "speaker_id": t.speaker_id,
+                    "created_at": t.created_at.isoformat(),
+                }
+                for t in reversed(transcripts)
+            ],
+            "count": len(transcripts),
+        }
+
+
+@app.get("/api/transcripts/stats")
+def get_transcript_stats(stream_id: Optional[int] = None) -> Dict[str, Any]:
+    """Get transcript statistics.
+
+    Args:
+        stream_id: Optional stream ID to get stats for
+
+    Returns:
+        Statistics about transcripts
+    """
+    from sqlmodel import select, func, col
+    from app.db import engine
+
+    with Session(engine) as session:
+        if stream_id is not None:
+            total = transcript_service.count_by_stream(stream_id)
+            return {
+                "stream_id": stream_id,
+                "total_transcripts": total,
+            }
+        else:
+            # Get stats for all streams
+            statement = select(
+                Transcript.stream_id,
+                func.count(Transcript.id).label("count")
+            ).group_by(Transcript.stream_id)
+            results = session.exec(statement).all()
+
+            return {
+                "streams": [
+                    {"stream_id": r[0], "count": r[1]}
+                    for r in results
+                ],
+                "total_transcripts": sum(r[1] for r in results),
+            }
+
+
+@app.delete("/api/transcripts/cleanup")
+def cleanup_transcripts(
+    max_age_days: int = 30,
+    stream_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Clean up old transcripts.
+
+    Args:
+        max_age_days: Delete transcripts older than this many days (default 30)
+        stream_id: If provided, delete all transcripts for this stream
+
+    Returns:
+        Number of transcripts deleted
+    """
+    if stream_id is not None:
+        deleted = transcript_service.delete_by_stream(stream_id)
+        return {
+            "deleted": deleted,
+            "stream_id": stream_id,
+            "message": f"Deleted all transcripts for stream {stream_id}",
+        }
+    else:
+        deleted = transcript_service.cleanup_old(max_age_days=max_age_days)
+        return {
+            "deleted": deleted,
+            "max_age_days": max_age_days,
+            "message": f"Deleted transcripts older than {max_age_days} days",
+        }
 
 
 # =============================================================================
