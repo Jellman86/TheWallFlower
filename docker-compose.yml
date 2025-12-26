@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  thewallflower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: thewallflower
+    ports:
+      - "${PORT:-8080}:8000"
+    volumes:
+      - thewallflower-data:/data
+    environment:
+      - DATABASE_URL=sqlite:///data/thewallflower.db
+      - WHISPER_HOST=whisper-live
+      - WHISPER_PORT=9090
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WORKERS=${WORKERS:-1}
+      - WAIT_FOR_WHISPER=true
+    depends_on:
+      whisper-live:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - thewallflower-net
+
+  whisper-live:
+    image: ghcr.io/collabora/whisperlive-gpu:latest
+    container_name: whisper-live
+    ports:
+      - "${WHISPER_PORT:-9090}:9090"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - thewallflower-net
+    # GPU support - uncomment for NVIDIA GPU acceleration
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  thewallflower-data:
+    driver: local
+
+networks:
+  thewallflower-net:
+    name: thewallflower-network
+    driver: bridge
