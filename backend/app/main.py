@@ -24,6 +24,7 @@ from app.models import (
 from app.stream_manager import stream_manager
 from app.worker import StreamStatus
 from app.services.transcript_service import transcript_service
+from app.services.event_broadcaster import event_broadcaster, StreamEvent
 from app.models import Transcript, TranscriptRead
 
 # Configure logging
@@ -566,6 +567,118 @@ def cleanup_transcripts(
             "max_age_days": max_age_days,
             "message": f"Deleted transcripts older than {max_age_days} days",
         }
+
+
+# =============================================================================
+# Server-Sent Events (SSE)
+# =============================================================================
+
+@app.get("/api/events")
+async def global_events():
+    """SSE endpoint for all stream events.
+
+    Streams real-time updates for all streams including:
+    - status: Stream status changes (connected, fps, etc.)
+    - transcript: New transcript segments
+    - error: Error notifications
+
+    Usage:
+        const eventSource = new EventSource('/api/events');
+        eventSource.addEventListener('status', (e) => console.log(JSON.parse(e.data)));
+        eventSource.addEventListener('transcript', (e) => console.log(JSON.parse(e.data)));
+    """
+    async def event_generator():
+        queue = await event_broadcaster.subscribe(stream_id=None)
+        try:
+            # Send initial connection event
+            yield "event: connected\ndata: {\"message\": \"Connected to event stream\"}\n\n"
+
+            while True:
+                try:
+                    # Wait for events with timeout for keepalive
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield event.to_sse()
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await event_broadcaster.unsubscribe(queue, stream_id=None)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@app.get("/api/streams/{stream_id}/events")
+async def stream_events(stream_id: int):
+    """SSE endpoint for a specific stream's events.
+
+    Streams real-time updates for a single stream including:
+    - status: Stream status changes
+    - transcript: New transcript segments
+    - error: Error notifications
+
+    Args:
+        stream_id: The stream to subscribe to
+    """
+    # Verify stream exists
+    with Session(engine) as session:
+        stream = session.get(StreamConfig, stream_id)
+        if not stream:
+            raise HTTPException(status_code=404, detail="Stream not found")
+
+    async def event_generator():
+        queue = await event_broadcaster.subscribe(stream_id=stream_id)
+        try:
+            # Send initial connection event with current status
+            worker = stream_manager.get_worker(stream_id)
+            if worker:
+                status = worker.status
+                initial_status = {
+                    "type": "status",
+                    "stream_id": stream_id,
+                    "data": {
+                        "is_running": status.is_running,
+                        "video_connected": status.video_connected,
+                        "audio_connected": status.audio_connected,
+                        "whisper_connected": status.whisper_connected,
+                        "fps": status.fps,
+                        "error": status.error,
+                    },
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                yield f"event: status\ndata: {json.dumps(initial_status)}\n\n"
+            else:
+                yield "event: connected\ndata: {\"message\": \"Connected, stream not running\"}\n\n"
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield event.to_sse()
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await event_broadcaster.unsubscribe(queue, stream_id=stream_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 # =============================================================================

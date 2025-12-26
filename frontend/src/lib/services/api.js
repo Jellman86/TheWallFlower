@@ -2,7 +2,8 @@
  * API service for TheWallflower backend.
  */
 
-const BASE_URL = '/api';
+export const API_BASE = '/api';
+const BASE_URL = API_BASE;
 
 /**
  * Handle API response, throwing on error.

@@ -21,6 +21,7 @@ import websockets
 from app.models import StreamConfig, TranscriptCreate
 from app.processors import FrameProcessor, MjpegStreamer, SnapshotProcessor
 from app.services.transcript_service import transcript_service
+from app.services.event_broadcaster import event_broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,22 @@ class StreamWorker:
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0
 
+    def _emit_status_event(self) -> None:
+        """Emit current status via SSE."""
+        status = self.status
+        event_broadcaster.emit_status(self.config.id, {
+            "is_running": status.is_running,
+            "video_connected": status.video_connected,
+            "audio_connected": status.audio_connected,
+            "whisper_connected": status.whisper_connected,
+            "fps": status.fps,
+            "error": status.error,
+            "video_thread_alive": status.video_thread_alive,
+            "audio_thread_alive": status.audio_thread_alive,
+            "ffmpeg_restarts": status.ffmpeg_restarts,
+            "whisper_reconnects": status.whisper_reconnects,
+        })
+
     @property
     def status(self) -> StreamStatus:
         """Get current stream status with thread health."""
@@ -135,6 +152,7 @@ class StreamWorker:
         self._stop_event.clear()
         self._status.is_running = True
         self._status.error = None
+        self._emit_status_event()
 
         # Initialize processors
         self._setup_processors()
@@ -181,6 +199,7 @@ class StreamWorker:
         self._status.video_connected = False
         self._status.audio_connected = False
         self._status.whisper_connected = False
+        self._emit_status_event()
 
     def _setup_processors(self) -> None:
         """Initialize frame processors."""
@@ -222,6 +241,7 @@ class StreamWorker:
                         if retry_count > max_retries:
                             self._status.error = "Failed to connect to RTSP stream"
                             logger.error(f"Stream {self.config.id}: {self._status.error}")
+                            self._emit_status_event()
                             break
                         time.sleep(2)
                         continue
@@ -230,6 +250,7 @@ class StreamWorker:
                     self._status.error = None
                     retry_count = 0
                     logger.info(f"Connected to stream {self.config.id}")
+                    self._emit_status_event()
 
                 # Read frame
                 ret, frame = cap.read()
@@ -238,6 +259,7 @@ class StreamWorker:
                     cap.release()
                     cap = None
                     self._status.video_connected = False
+                    self._emit_status_event()
                     time.sleep(1)
                     continue
 
@@ -356,6 +378,7 @@ class StreamWorker:
                 self._ffmpeg_process = ffmpeg_process
                 self._status.audio_connected = True
                 self._status.ffmpeg_restarts += 1
+                self._emit_status_event()
 
                 # Start stderr reader thread to prevent buffer blocking
                 stderr_thread = threading.Thread(
@@ -398,6 +421,7 @@ class StreamWorker:
             self._status.whisper_connected = False
             self._status.audio_connected = False
             self._ffmpeg_process = None
+            self._emit_status_event()
             if ffmpeg_process:
                 try:
                     ffmpeg_process.terminate()
@@ -472,6 +496,14 @@ class StreamWorker:
                     # Callback for real-time updates
                     if self.on_transcript:
                         self.on_transcript(self.config.id, segment)
+
+                    # Emit via SSE for real-time frontend updates
+                    event_broadcaster.emit_transcript(self.config.id, {
+                        "text": segment.text,
+                        "start_time": segment.start_time,
+                        "end_time": segment.end_time,
+                        "is_final": segment.is_final,
+                    })
 
             except asyncio.TimeoutError:
                 continue

@@ -1,5 +1,5 @@
 <script>
-  import { video, status, transcripts, control } from '../services/api.js';
+  import { video, status, transcripts, control, API_BASE } from '../services/api.js';
   import Icon from './Icons.svelte';
 
   let {
@@ -13,34 +13,92 @@
   let transcriptList = $state([]);
   let isLoading = $state(false);
   let showTranscripts = $state(true);
-  let statusInterval = $state(null);
-  let transcriptInterval = $state(null);
+  let eventSource = $state(null);
+  let reconnectTimeout = $state(null);
 
   // Derived state
   let isRunning = $derived(streamStatus?.is_running ?? false);
   let isConnected = $derived(streamStatus?.video_connected ?? false);
   let hasWhisper = $derived(stream.whisper_enabled && streamStatus?.whisper_connected);
 
-  // Poll status and transcripts
+  // Connect to SSE for real-time updates
   $effect(() => {
     if (stream?.id) {
+      // Initial fetch for immediate data
       fetchStatus();
       if (stream.whisper_enabled) {
         fetchTranscripts();
       }
 
-      // Poll every 2 seconds
-      statusInterval = setInterval(fetchStatus, 2000);
-      if (stream.whisper_enabled) {
-        transcriptInterval = setInterval(fetchTranscripts, 3000);
-      }
+      // Connect to SSE
+      connectSSE();
     }
 
     return () => {
-      if (statusInterval) clearInterval(statusInterval);
-      if (transcriptInterval) clearInterval(transcriptInterval);
+      disconnectSSE();
     };
   });
+
+  function connectSSE() {
+    if (eventSource) {
+      eventSource.close();
+    }
+
+    const url = `${API_BASE}/streams/${stream.id}/events`;
+    eventSource = new EventSource(url);
+
+    eventSource.addEventListener('status', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        streamStatus = data.data;
+      } catch (e) {
+        console.error('Failed to parse status event:', e);
+      }
+    });
+
+    eventSource.addEventListener('transcript', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const transcript = data.data;
+        // Add to front of list (newest first)
+        transcriptList = [transcript, ...transcriptList.slice(0, 9)];
+      } catch (e) {
+        console.error('Failed to parse transcript event:', e);
+      }
+    });
+
+    eventSource.addEventListener('error', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.error('Stream error:', data.data?.error);
+      } catch (e) {
+        // Connection error, not a data error
+      }
+    });
+
+    eventSource.onerror = () => {
+      // SSE connection failed, try to reconnect after delay
+      eventSource?.close();
+      eventSource = null;
+
+      // Reconnect after 5 seconds
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      reconnectTimeout = setTimeout(() => {
+        if (stream?.id) connectSSE();
+      }, 5000);
+    };
+  }
+
+  function disconnectSSE() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  }
 
   async function fetchStatus() {
     try {
