@@ -1,6 +1,6 @@
 <script>
   import { video, status, transcripts, control } from '../services/api.js';
-  import { Settings, Play, Square, RotateCw, Maximize2, Volume2, VolumeX } from 'lucide-svelte';
+  import Icon from './Icons.svelte';
 
   let {
     stream,
@@ -109,14 +109,14 @@
         class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
         title="Focus view"
       >
-        <Maximize2 size={16} />
+        <Icon name="maximize" size={16} />
       </button>
       <button
         onclick={() => onEdit(stream)}
         class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
         title="Settings"
       >
-        <Settings size={16} />
+        <Icon name="settings" size={16} />
       </button>
     </div>
   </div>
@@ -147,9 +147,9 @@
     {#if stream.whisper_enabled}
       <div class="absolute top-2 right-2">
         {#if hasWhisper}
-          <Volume2 size={18} class="text-[var(--color-success)]" />
+          <Icon name="volume" size={18} class="text-[var(--color-success)]" />
         {:else}
-          <VolumeX size={18} class="text-[var(--color-text-muted)]" />
+          <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)]" />
         {/if}
       </div>
     {/if}
@@ -179,7 +179,7 @@
           disabled={isLoading}
           class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-success)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
         >
-          <Play size={14} />
+          <Icon name="play" size={14} />
           Start
         </button>
       {:else}
@@ -188,7 +188,7 @@
           disabled={isLoading}
           class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-danger)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
         >
-          <Square size={14} />
+          <Icon name="stop" size={14} />
           Stop
         </button>
         <button
@@ -196,7 +196,7 @@
           disabled={isLoading}
           class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-warning)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
         >
-          <RotateCw size={14} />
+          <Icon name="rotate" size={14} />
           Restart
         </button>
       {/if}

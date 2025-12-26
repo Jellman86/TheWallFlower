@@ -1,6 +1,6 @@
 <script>
   import { streams } from '../services/api.js';
-  import { X, Trash2, Save } from 'lucide-svelte';
+  import Icon from './Icons.svelte';
 
   let {
     stream = null,
@@ -105,11 +105,10 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if isOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
     onclick={handleBackdropClick}
-    role="dialog"
-    aria-modal="true"
   >
     <div class="bg-[var(--color-bg-card)] rounded-lg shadow-2xl w-full max-w-md mx-4 border border-[var(--color-border)]">
       <!-- Header -->
@@ -119,7 +118,7 @@
           onclick={onClose}
           class="p-1 hover:bg-[var(--color-bg-hover)] rounded transition-colors"
         >
-          <X size={20} />
+          <Icon name="x" size={20} />
         </button>
       </div>
 
@@ -196,7 +195,7 @@
               disabled={isLoading}
               class="flex items-center gap-1 px-3 py-2 text-sm text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded transition-colors disabled:opacity-50"
             >
-              <Trash2 size={16} />
+              <Icon name="trash" size={16} />
               Delete
             </button>
           {:else}
@@ -216,7 +215,7 @@
               disabled={isLoading}
               class="flex items-center gap-1 px-4 py-2 text-sm bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors disabled:opacity-50"
             >
-              <Save size={16} />
+              <Icon name="save" size={16} />
               {isEditing ? 'Save' : 'Create'}
             </button>
           </div>

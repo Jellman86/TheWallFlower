@@ -6,11 +6,11 @@ running frame processors and connecting to WhisperLive for transcription.
 
 import asyncio
 import logging
-import os
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional, Callable
 import json
 
@@ -22,6 +22,11 @@ from app.models import StreamConfig
 from app.processors import FrameProcessor, MjpegStreamer, SnapshotProcessor
 
 logger = logging.getLogger(__name__)
+
+# Reconnection backoff configuration
+WHISPER_RECONNECT_BACKOFF = [1, 2, 5, 10, 30, 60]  # seconds
+FFMPEG_RESTART_DELAY = 2  # seconds
+THREAD_HEALTH_CHECK_INTERVAL = 10  # seconds
 
 
 @dataclass
@@ -44,6 +49,13 @@ class StreamStatus:
     fps: float = 0.0
     error: Optional[str] = None
     last_transcript: Optional[str] = None
+    # Health tracking
+    video_thread_alive: bool = False
+    audio_thread_alive: bool = False
+    ffmpeg_restarts: int = 0
+    whisper_reconnects: int = 0
+    last_frame_time: Optional[datetime] = None
+    last_audio_time: Optional[datetime] = None
 
 
 class StreamWorker:
@@ -70,6 +82,8 @@ class StreamWorker:
         self._stop_event = threading.Event()
         self._video_thread: Optional[threading.Thread] = None
         self._audio_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._ffmpeg_process: Optional[subprocess.Popen] = None
 
         # Status
         self._status = StreamStatus(stream_id=config.id)
@@ -82,11 +96,21 @@ class StreamWorker:
         self._transcript_segments: List[TranscriptSegment] = []
         self._transcript_lock = threading.Lock()
 
+        # Reconnection tracking
+        self._whisper_reconnect_attempts = 0
+
     @property
     def status(self) -> StreamStatus:
-        """Get current stream status."""
+        """Get current stream status with thread health."""
         if self._mjpeg_streamer:
             self._status.fps = self._mjpeg_streamer.fps
+        # Update thread health status
+        self._status.video_thread_alive = (
+            self._video_thread is not None and self._video_thread.is_alive()
+        )
+        self._status.audio_thread_alive = (
+            self._audio_thread is not None and self._audio_thread.is_alive()
+        )
         return self._status
 
     @property
@@ -183,6 +207,7 @@ class StreamWorker:
         cap = None
         retry_count = 0
         max_retries = 5
+        processor_failures: dict[str, int] = {}  # Track processor failure counts
 
         while not self._stop_event.is_set():
             try:
@@ -215,12 +240,25 @@ class StreamWorker:
                     time.sleep(1)
                     continue
 
-                # Run frame through all processors
+                # Track last successful frame time
+                self._status.last_frame_time = datetime.now()
+
+                # Run frame through all processors with isolation
                 for processor in self._processors:
                     try:
                         frame = processor.process(frame)
+                        # Reset failure count on success
+                        processor_failures[processor.name] = 0
                     except Exception as e:
-                        logger.error(f"Processor {processor.name} error: {e}")
+                        # Track failures per processor
+                        processor_failures[processor.name] = processor_failures.get(processor.name, 0) + 1
+                        failure_count = processor_failures[processor.name]
+
+                        if failure_count <= 3:
+                            logger.error(f"Processor {processor.name} error ({failure_count}): {e}")
+                        elif failure_count == 4:
+                            logger.error(f"Processor {processor.name} failing repeatedly, suppressing logs")
+                        # Continue with other processors even if one fails
 
             except Exception as e:
                 logger.error(f"Video loop error for stream {self.config.id}: {e}")
@@ -237,21 +275,48 @@ class StreamWorker:
         logger.info(f"Video thread stopped for stream {self.config.id}")
 
     def _audio_loop(self) -> None:
-        """Audio extraction and WhisperLive connection loop."""
+        """Audio extraction and WhisperLive connection loop with exponential backoff."""
         logger.info(f"Audio thread started for stream {self.config.id}")
 
         while not self._stop_event.is_set():
             try:
                 # Run the async whisper connection in this thread
                 asyncio.run(self._whisper_connection())
+                # Reset reconnect attempts on successful connection that ended gracefully
+                self._whisper_reconnect_attempts = 0
             except Exception as e:
                 logger.error(f"Audio loop error for stream {self.config.id}: {e}")
                 self._status.whisper_connected = False
 
             if not self._stop_event.is_set():
-                time.sleep(5)  # Retry delay
+                # Exponential backoff for reconnection
+                backoff_index = min(
+                    self._whisper_reconnect_attempts,
+                    len(WHISPER_RECONNECT_BACKOFF) - 1
+                )
+                delay = WHISPER_RECONNECT_BACKOFF[backoff_index]
+                self._whisper_reconnect_attempts += 1
+                self._status.whisper_reconnects += 1
+
+                logger.info(
+                    f"WhisperLive reconnecting in {delay}s "
+                    f"(attempt {self._whisper_reconnect_attempts}) for stream {self.config.id}"
+                )
+                time.sleep(delay)
 
         logger.info(f"Audio thread stopped for stream {self.config.id}")
+
+    def _read_ffmpeg_stderr(self, process: subprocess.Popen) -> None:
+        """Read FFmpeg stderr to prevent buffer blocking and log errors."""
+        try:
+            while process.poll() is None and not self._stop_event.is_set():
+                line = process.stderr.readline()
+                if line:
+                    decoded = line.decode().strip()
+                    if decoded:
+                        logger.warning(f"FFmpeg [{self.config.id}]: {decoded}")
+        except Exception as e:
+            logger.debug(f"FFmpeg stderr reader ended: {e}")
 
     async def _whisper_connection(self) -> None:
         """Connect to WhisperLive and stream audio."""
@@ -267,15 +332,17 @@ class StreamWorker:
             "-ar", "16000",  # 16kHz sample rate (required by Whisper)
             "-ac", "1",  # Mono
             "-f", "s16le",  # Raw PCM format
-            "-loglevel", "error",
+            "-loglevel", "warning",  # Show warnings and errors
             "pipe:1"  # Output to stdout
         ]
 
         ffmpeg_process = None
+        stderr_thread = None
 
         try:
             async with websockets.connect(whisper_url) as ws:
                 self._status.whisper_connected = True
+                self._whisper_reconnect_attempts = 0  # Reset on successful connect
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
                 # Start FFmpeg process
@@ -285,7 +352,18 @@ class StreamWorker:
                     stderr=subprocess.PIPE,
                     bufsize=10**6
                 )
+                self._ffmpeg_process = ffmpeg_process
                 self._status.audio_connected = True
+                self._status.ffmpeg_restarts += 1
+
+                # Start stderr reader thread to prevent buffer blocking
+                stderr_thread = threading.Thread(
+                    target=self._read_ffmpeg_stderr,
+                    args=(ffmpeg_process,),
+                    name=f"ffmpeg-stderr-{self.config.id}",
+                    daemon=True
+                )
+                stderr_thread.start()
 
                 # Create tasks for sending audio and receiving transcripts
                 send_task = asyncio.create_task(
@@ -304,27 +382,46 @@ class StreamWorker:
                 # Cancel pending tasks
                 for task in pending:
                     task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
         except websockets.exceptions.ConnectionClosed:
             logger.warning(f"WhisperLive connection closed for stream {self.config.id}")
+        except ConnectionRefusedError:
+            logger.warning(f"WhisperLive connection refused for stream {self.config.id}")
         except Exception as e:
             logger.error(f"WhisperLive error for stream {self.config.id}: {e}")
         finally:
             self._status.whisper_connected = False
             self._status.audio_connected = False
+            self._ffmpeg_process = None
             if ffmpeg_process:
-                ffmpeg_process.terminate()
-                ffmpeg_process.wait()
+                try:
+                    ffmpeg_process.terminate()
+                    ffmpeg_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    ffmpeg_process.kill()
+                    ffmpeg_process.wait()
 
     async def _send_audio(self, ws, ffmpeg_process: subprocess.Popen) -> None:
         """Send audio chunks to WhisperLive."""
         chunk_size = 4096  # 16-bit samples at 16kHz
 
         while not self._stop_event.is_set():
+            # Check if FFmpeg process is still running
+            if ffmpeg_process.poll() is not None:
+                logger.warning(f"FFmpeg process ended for stream {self.config.id}")
+                break
+
             # Read audio chunk from FFmpeg
             audio_chunk = ffmpeg_process.stdout.read(chunk_size)
             if not audio_chunk:
                 break
+
+            # Track last successful audio time
+            self._status.last_audio_time = datetime.now()
 
             # Send to WhisperLive
             try:

@@ -2,7 +2,7 @@
   import { streams, healthCheck } from './lib/services/api.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
-  import { Plus, LayoutGrid, Maximize, RefreshCw, Flower } from 'lucide-svelte';
+  import Icon from './lib/components/Icons.svelte';
 
   // State
   let streamList = $state([]);
@@ -79,7 +79,7 @@
   <header class="bg-[var(--color-bg-card)] border-b border-[var(--color-border)] px-6 py-4">
     <div class="flex items-center justify-between max-w-7xl mx-auto">
       <div class="flex items-center gap-3">
-        <Flower size={28} class="text-[var(--color-primary)]" />
+        <Icon name="flower" size={28} class="text-[var(--color-primary)]" />
         <h1 class="text-xl font-bold">TheWallflower</h1>
         <span class="text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] px-2 py-0.5 rounded">
           NVR
@@ -102,7 +102,7 @@
             class="p-2 {viewMode === 'grid' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
             title="Grid view"
           >
-            <LayoutGrid size={18} />
+            <Icon name="grid" size={18} />
           </button>
           <button
             onclick={() => viewMode = 'focus'}
@@ -110,7 +110,7 @@
             title="Focus view"
             disabled={!focusedStream}
           >
-            <Maximize size={18} />
+            <Icon name="maximize" size={18} />
           </button>
         </div>
 
@@ -120,7 +120,7 @@
           class="p-2 hover:bg-[var(--color-bg-hover)] rounded transition-colors"
           title="Refresh streams"
         >
-          <RefreshCw size={18} class={isLoading ? 'animate-spin' : ''} />
+          <Icon name="refresh" size={18} class={isLoading ? 'animate-spin' : ''} />
         </button>
 
         <!-- Add stream button -->
@@ -128,7 +128,7 @@
           onclick={handleAddStream}
           class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
         >
-          <Plus size={18} />
+          <Icon name="plus" size={18} />
           Add Stream
         </button>
       </div>
@@ -148,7 +148,7 @@
       {#if isLoading && streamList.length === 0}
         <div class="flex items-center justify-center h-64">
           <div class="text-center">
-            <RefreshCw size={32} class="animate-spin mx-auto mb-4 text-[var(--color-text-muted)]" />
+            <Icon name="refresh" size={32} class="animate-spin mx-auto mb-4 text-[var(--color-text-muted)]" />
             <p class="text-[var(--color-text-muted)]">Loading streams...</p>
           </div>
         </div>
@@ -156,7 +156,7 @@
         <!-- Empty state -->
         <div class="flex items-center justify-center h-64">
           <div class="text-center">
-            <Flower size={48} class="mx-auto mb-4 text-[var(--color-text-muted)]" />
+            <Icon name="flower" size={48} class="mx-auto mb-4 text-[var(--color-text-muted)]" />
             <h2 class="text-xl font-semibold mb-2">No Streams Configured</h2>
             <p class="text-[var(--color-text-muted)] mb-4">
               Add your first RTSP camera stream to get started.
@@ -165,7 +165,7 @@
               onclick={handleAddStream}
               class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors mx-auto"
             >
-              <Plus size={18} />
+              <Icon name="plus" size={18} />
               Add Your First Stream
             </button>
           </div>
