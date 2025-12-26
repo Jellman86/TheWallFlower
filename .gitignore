@@ -13,8 +13,6 @@ env/
 dist/
 build/
 
-agents/
-
 # Node
 node_modules/
 npm-debug.log*
@@ -45,5 +43,5 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Agents (local development)
-agents/
+# Agents - project documentation and plans
+# agents/  # Uncomment to ignore local agent files
