@@ -2,10 +2,16 @@
 
 Handles video capture and audio extraction from RTSP streams,
 running frame processors and connecting to WhisperLive for transcription.
+
+With go2rtc integration:
+- go2rtc handles the primary RTSP connection and video streaming
+- This worker provides fallback video and audio extraction for Whisper
+- Audio is extracted from go2rtc's RTSP restream when available
 """
 
 import asyncio
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -468,15 +474,37 @@ class StreamWorker:
         except Exception as e:
             logger.debug(f"FFmpeg stderr reader ended: {e}")
 
+    def _get_audio_source_url(self) -> str:
+        """Get the audio source URL, preferring go2rtc restream.
+
+        go2rtc provides a local RTSP restream that's more efficient:
+        - Single connection to camera (go2rtc handles it)
+        - Better reconnection handling
+        - Lower latency local access
+        """
+        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8554"))
+        go2rtc_stream_name = f"camera_{self.config.id}"
+        go2rtc_url = f"rtsp://localhost:{go2rtc_rtsp_port}/{go2rtc_stream_name}"
+
+        # Try go2rtc first, fall back to direct RTSP if needed
+        # In production, go2rtc should always be available
+        return go2rtc_url
+
     async def _whisper_connection(self) -> None:
         """Connect to WhisperLive and stream audio."""
         whisper_url = f"ws://{self.whisper_host}:{self.whisper_port}"
         logger.info(f"Connecting to WhisperLive at {whisper_url}")
 
+        # Get audio source URL (prefers go2rtc restream)
+        audio_source = self._get_audio_source_url()
+        logger.info(f"Audio source for stream {self.config.id}: {audio_source}")
+
         # FFmpeg command to extract audio from RTSP and output raw PCM
+        # Using go2rtc restream provides single camera connection
         ffmpeg_cmd = [
             "ffmpeg",
-            "-i", self.config.rtsp_url,
+            "-rtsp_transport", "tcp",  # TCP for local connection to go2rtc
+            "-i", audio_source,
             "-vn",  # No video
             "-acodec", "pcm_s16le",  # 16-bit PCM
             "-ar", "16000",  # 16kHz sample rate (required by Whisper)

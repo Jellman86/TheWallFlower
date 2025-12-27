@@ -61,5 +61,12 @@
     <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
     <polyline points="17 21 17 13 7 13 7 21"></polyline>
     <polyline points="7 3 7 8 15 8"></polyline>
+  {:else if name === 'video'}
+    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+  {:else if name === 'alert-triangle'}
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+    <line x1="12" y1="9" x2="12" y2="13"></line>
+    <line x1="12" y1="17" x2="12.01" y2="17"></line>
   {/if}
 </svg>

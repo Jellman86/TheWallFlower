@@ -1,10 +1,11 @@
 <script>
-  import { status } from '../services/api.js';
+  import { status, go2rtc } from '../services/api.js';
   import Icon from './Icons.svelte';
 
   let { streams = [] } = $props();
 
   let allStatus = $state({});
+  let go2rtcStatus = $state(null);
   let isLoading = $state(true);
   let lastFetchedCount = $state(-1); // Track to prevent duplicate fetches
 
@@ -23,6 +24,10 @@
     Object.values(allStatus).filter(s => s?.whisper_connected).length
   );
 
+  // go2rtc status
+  let go2rtcHealthy = $derived(go2rtcStatus?.status === 'healthy');
+  let go2rtcStreamCount = $derived(go2rtcStatus?.stream_count ?? 0);
+
   // Fetch all stream statuses - only when stream count changes
   $effect(() => {
     const count = streams.length;
@@ -35,8 +40,12 @@
   async function fetchAllStatus() {
     isLoading = true;
     try {
-      const result = await status.getAll();
-      allStatus = result || {};
+      const [statusResult, go2rtcResult] = await Promise.all([
+        status.getAll(),
+        go2rtc.getStatus().catch(() => null)
+      ]);
+      allStatus = statusResult || {};
+      go2rtcStatus = go2rtcResult;
     } catch (e) {
       console.error('Failed to fetch status:', e);
     }
@@ -96,22 +105,38 @@
     </div>
   </div>
 
-  <!-- Refresh -->
+  <!-- go2rtc Status -->
   <div class="bg-[var(--color-bg-card)] rounded-lg p-4 border border-[var(--color-border)]">
     <div class="flex items-center gap-3">
-      <div class="p-2 bg-[var(--color-warning)]/20 rounded-lg">
-        <Icon name="refresh" size={24} class="text-[var(--color-warning)]" />
+      <div class="p-2 {go2rtcHealthy ? 'bg-[var(--color-success)]/20' : 'bg-[var(--color-warning)]/20'} rounded-lg">
+        <Icon name="video" size={24} class="{go2rtcHealthy ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'}" />
       </div>
       <div class="flex-1">
-        <button
-          onclick={fetchAllStatus}
-          disabled={isLoading}
-          class="text-sm font-medium hover:text-[var(--color-primary)] transition-colors disabled:opacity-50"
-        >
-          Refresh Status
-        </button>
-        <p class="text-xs text-[var(--color-text-muted)]">Update all streams</p>
+        <p class="text-2xl font-bold">
+          {#if isLoading}
+            <span class="text-[var(--color-text-muted)]">...</span>
+          {:else if go2rtcStatus}
+            {go2rtcStreamCount}<span class="text-base text-[var(--color-text-muted)]">/{totalStreams}</span>
+          {:else}
+            <span class="text-[var(--color-text-muted)]">-</span>
+          {/if}
+        </p>
+        <p class="text-xs text-[var(--color-text-muted)]">
+          {#if go2rtcHealthy}
+            go2rtc Active
+          {:else}
+            go2rtc Offline
+          {/if}
+        </p>
       </div>
+      <button
+        onclick={fetchAllStatus}
+        disabled={isLoading}
+        class="p-1.5 hover:bg-[var(--color-bg-hover)] rounded transition-colors disabled:opacity-50"
+        title="Refresh status"
+      >
+        <Icon name="refresh" size={16} class={isLoading ? 'animate-spin' : ''} />
+      </button>
     </div>
   </div>
 </div>
