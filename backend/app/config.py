@@ -19,11 +19,11 @@ class Settings:
     whisper_host: str = "whisper-live"
     whisper_port: int = 9090
 
-    # go2rtc configuration
+    # go2rtc configuration (ports offset from Frigate defaults to avoid conflicts)
     go2rtc_host: str = "localhost"
-    go2rtc_port: int = 1984
-    go2rtc_rtsp_port: int = 8554
-    go2rtc_webrtc_port: int = 8555
+    go2rtc_port: int = 1985
+    go2rtc_rtsp_port: int = 8654
+    go2rtc_webrtc_port: int = 8655
     go2rtc_external_host: str = ""  # External host for browser access
 
     # Application

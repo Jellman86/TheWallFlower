@@ -481,8 +481,10 @@ class StreamWorker:
         - Single connection to camera (go2rtc handles it)
         - Better reconnection handling
         - Lower latency local access
+
+        Note: Port 8654 (not 8554) to avoid conflict with Frigate.
         """
-        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8554"))
+        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8654"))
         go2rtc_stream_name = f"camera_{self.config.id}"
         go2rtc_url = f"rtsp://localhost:{go2rtc_rtsp_port}/{go2rtc_stream_name}"
 

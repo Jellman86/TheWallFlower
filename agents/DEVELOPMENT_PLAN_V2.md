@@ -547,7 +547,7 @@ Camera → go2rtc → MJPEG/WebRTC/HLS → Browser
 **Docker Changes:**
 - go2rtc v1.9.9 binary bundled in container
 - Started in `docker-entrypoint.sh` before Python app
-- Ports: 1984 (API), 8554 (RTSP), 8555 (WebRTC)
+- Ports: 1985 (API), 8654 (RTSP), 8655 (WebRTC) - offset from Frigate to avoid conflicts
 
 **Backend Changes:**
 - `backend/app/go2rtc_client.py` - Async client for go2rtc REST API
@@ -560,11 +560,12 @@ Camera → go2rtc → MJPEG/WebRTC/HLS → Browser
 - `StreamCard.svelte` - Uses go2rtc MJPEG with legacy fallback
 - `StatsPanel.svelte` - Shows go2rtc status
 
-### Accessing go2rtc
-- **Web UI:** `http://your-host:1984` - Manage streams, view codecs
-- **MJPEG:** `http://your-host:1984/api/stream.mjpeg?src=camera_N`
-- **WebRTC:** `http://your-host:1984/stream.html?src=camera_N`
-- **RTSP:** `rtsp://your-host:8554/camera_N`
+### Accessing go2rtc (Internal)
+go2rtc is used internally - all control is via TheWallflower UI.
+- **MJPEG:** `http://your-host:1985/api/stream.mjpeg?src=camera_N`
+- **WebRTC:** `http://your-host:1985/api/webrtc?src=camera_N`
+- **RTSP:** `rtsp://your-host:8654/camera_N`
+- **Debug UI:** `http://your-host:1985` (optional, for troubleshooting)
 
 ### Remaining Optimizations (Optional)
 1. Remove OpenCV dependency (video loop now mainly for fallback)

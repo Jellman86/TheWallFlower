@@ -74,16 +74,16 @@ ENV DATABASE_URL="sqlite:///data/thewallflower.db" \
     PYTHONDONTWRITEBYTECODE="1" \
     PYTHONPATH="/app/backend" \
     GO2RTC_HOST="localhost" \
-    GO2RTC_PORT="1984" \
-    GO2RTC_RTSP_PORT="8554" \
-    GO2RTC_WEBRTC_PORT="8555"
+    GO2RTC_PORT="1985" \
+    GO2RTC_RTSP_PORT="8654" \
+    GO2RTC_WEBRTC_PORT="8655"
 
 # Expose ports
 # 8000: Main API
-# 1984: go2rtc HTTP API & WebUI
-# 8554: go2rtc RTSP server
-# 8555: go2rtc WebRTC
-EXPOSE 8000 1984 8554 8555
+# 1985: go2rtc HTTP API & WebUI (1985 to avoid Frigate conflict)
+# 8654: go2rtc RTSP server (8654 to avoid Frigate conflict)
+# 8655: go2rtc WebRTC (8655 to avoid Frigate conflict)
+EXPOSE 8000 1985 8654 8655
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

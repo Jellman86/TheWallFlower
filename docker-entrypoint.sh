@@ -61,11 +61,11 @@ export WHISPER_PORT="${WHISPER_PORT:-9090}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 export WORKERS="${WORKERS:-1}"
 
-# go2rtc configuration
+# go2rtc configuration (ports offset from Frigate defaults to avoid conflicts)
 export GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
-export GO2RTC_PORT="${GO2RTC_PORT:-1984}"
-export GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8554}"
-export GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-8555}"
+export GO2RTC_PORT="${GO2RTC_PORT:-1985}"
+export GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8654}"
+export GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-8655}"
 export GO2RTC_CONFIG_PATH="${GO2RTC_CONFIG_PATH:-/data/go2rtc.yaml}"
 
 # Ensure data directory exists
@@ -122,21 +122,22 @@ python -c "from app.db import init_db; init_db()" 2>/dev/null || {
 # Create default go2rtc config if it doesn't exist
 if [ ! -f "$GO2RTC_CONFIG_PATH" ]; then
     log_info "Creating default go2rtc configuration..."
-    cat > "$GO2RTC_CONFIG_PATH" << 'EOYAML'
+    cat > "$GO2RTC_CONFIG_PATH" << EOYAML
 # go2rtc configuration for TheWallflower
 # Streams are managed dynamically via API
+# Ports offset from Frigate defaults (1984/8554/8555) to avoid conflicts
 
 api:
-  listen: ":1984"
+  listen: ":${GO2RTC_PORT}"
   origin: "*"
 
 rtsp:
-  listen: ":8554"
+  listen: ":${GO2RTC_RTSP_PORT}"
 
 webrtc:
-  listen: ":8555"
+  listen: ":${GO2RTC_WEBRTC_PORT}"
   candidates:
-    - stun:8555
+    - stun:${GO2RTC_WEBRTC_PORT}
 
 # Streams are added dynamically via API when cameras are started
 streams: {}

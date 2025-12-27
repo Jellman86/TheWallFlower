@@ -208,8 +208,9 @@ export const go2rtc = {
   get port() {
     if (this._port === null) {
       // Try to detect port from current URL or use default
-      // In production, go2rtc is on port 1984 on the same host
-      this._port = 1984;
+      // In production, go2rtc is on port 1985 on the same host
+      // (1985 instead of 1984 to avoid conflict with Frigate)
+      this._port = 1985;
     }
     return this._port;
   },
