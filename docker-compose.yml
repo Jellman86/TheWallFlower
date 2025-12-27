@@ -29,15 +29,19 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - thewallflower-net
+      - default
 
   whisper-live:
-    image: ghcr.io/collabora/whisperlive-gpu:latest
+    # Image selection: CPU, NVIDIA CUDA, or Intel OpenVINO
+    # Set WHISPER_IMAGE in .env or environment
+    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive:latest}
     container_name: whisper-live
     ports:
       - "${WHISPER_PORT:-9090}:9090"
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      # For OpenVINO: AUTO, CPU, GPU, or MULTI:CPU,GPU
+      - OPENVINO_DEVICE=${OPENVINO_DEVICE:-AUTO}
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
       interval: 10s
@@ -46,8 +50,15 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
-      - thewallflower-net
-    # GPU support - uncomment for NVIDIA GPU acceleration
+      - default
+    # Intel GPU support - uncomment for Intel iGPU/Arc acceleration
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - video
+    #   - render
+    #
+    # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration
     # deploy:
     #   resources:
     #     reservations:
@@ -61,6 +72,6 @@ volumes:
     driver: local
 
 networks:
-  thewallflower-net:
-    name: thewallflower-network
-    driver: bridge
+  default:
+    name: ${NETWORK_NAME:-thewallflower-network}
+    external: ${NETWORK_EXTERNAL:-false}

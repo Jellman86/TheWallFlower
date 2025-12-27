@@ -16,8 +16,9 @@
 4. [Phase 3: Core Feature Completion](#phase-3-core-feature-completion)
 5. [Phase 4: Speaker Diarization](#phase-4-speaker-diarization)
 6. [Phase 5: Advanced Features](#phase-5-advanced-features)
-7. [Technical Specifications](#technical-specifications)
-8. [Architecture Evolution](#architecture-evolution)
+7. [Phase 6: Intel GPU & OpenVINO Support](#phase-6-intel-gpu--openvino-support)
+8. [Technical Specifications](#technical-specifications)
+9. [Architecture Evolution](#architecture-evolution)
 
 ---
 
@@ -617,6 +618,300 @@ alembic upgrade head
            │  Postgres │          │    (GPU)    │         │ (Snapshots, │
            └───────────┘          └─────────────┘         │ Recordings) │
                                                           └─────────────┘
+```
+
+---
+
+## Phase 6: Intel GPU & OpenVINO Support
+
+**Goal:** Enable hardware acceleration on Intel GPUs and CPUs using OpenVINO.
+
+### 6.1 Overview
+
+Intel's OpenVINO toolkit provides optimized inference for:
+- Intel CPUs (with AVX-512, VNNI)
+- Intel integrated GPUs (Gen 9+, Xe, Arc)
+- Intel VPUs (Movidius, dedicated AI accelerators)
+- Intel discrete GPUs (Arc A-series)
+
+### 6.2 WhisperLive Backend Options
+
+| Backend | Hardware | Performance | Complexity |
+|---------|----------|-------------|------------|
+| **CPU (default)** | Any CPU | Baseline | Simple |
+| **CUDA** | NVIDIA GPU | 5-10x faster | Medium |
+| **OpenVINO** | Intel CPU/GPU | 2-5x faster | Medium |
+| **ROCm** | AMD GPU | 3-8x faster | Complex |
+
+### 6.3 Docker Image Strategy
+
+**Approach:** Multiple tagged images for different acceleration backends.
+
+```yaml
+# docker-compose.yml - Image selection via environment
+services:
+  whisper-live:
+    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive:latest}
+    # Variants:
+    # - ghcr.io/collabora/whisperlive:latest       (CPU only)
+    # - ghcr.io/collabora/whisperlive-gpu:latest   (NVIDIA CUDA)
+    # - ghcr.io/jellman86/whisperlive-openvino:latest (Intel OpenVINO)
+```
+
+**Environment Variables:**
+```bash
+# .env file examples
+
+# Default (CPU)
+WHISPER_IMAGE=ghcr.io/collabora/whisperlive:latest
+
+# NVIDIA GPU
+WHISPER_IMAGE=ghcr.io/collabora/whisperlive-gpu:latest
+
+# Intel GPU/CPU with OpenVINO
+WHISPER_IMAGE=ghcr.io/jellman86/whisperlive-openvino:latest
+```
+
+### 6.4 OpenVINO WhisperLive Image
+
+**Dockerfile.openvino:**
+```dockerfile
+FROM openvino/ubuntu22_runtime:latest
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    whisper \
+    faster-whisper \
+    openvino \
+    openvino-genai \
+    websockets \
+    numpy
+
+# OpenVINO optimized Whisper model
+# Convert whisper model to OpenVINO IR format
+RUN python -c "
+from openvino import convert_model
+import whisper
+model = whisper.load_model('base.en')
+# Export and optimize for OpenVINO
+"
+
+# Device selection via environment
+ENV OPENVINO_DEVICE=GPU
+# Options: CPU, GPU, AUTO, MULTI:CPU,GPU
+
+COPY whisper_server_openvino.py /app/
+WORKDIR /app
+
+EXPOSE 9090
+CMD ["python", "whisper_server_openvino.py"]
+```
+
+### 6.5 Device Auto-Detection
+
+**Implementation:**
+```python
+# utils/hardware_detect.py
+import subprocess
+import os
+
+def detect_acceleration():
+    """Detect available hardware acceleration."""
+
+    # Check for NVIDIA GPU
+    try:
+        result = subprocess.run(['nvidia-smi'], capture_output=True)
+        if result.returncode == 0:
+            return 'cuda', 'NVIDIA GPU detected'
+    except FileNotFoundError:
+        pass
+
+    # Check for Intel GPU
+    try:
+        result = subprocess.run(['ls', '/dev/dri'], capture_output=True)
+        if b'renderD128' in result.stdout:
+            # Check if it's Intel
+            lspci = subprocess.run(['lspci'], capture_output=True)
+            if b'Intel' in lspci.stdout and b'VGA' in lspci.stdout:
+                return 'openvino', 'Intel GPU detected'
+    except FileNotFoundError:
+        pass
+
+    # Check for Intel CPU features
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            cpuinfo = f.read()
+            if 'avx512' in cpuinfo.lower() or 'vnni' in cpuinfo.lower():
+                return 'openvino-cpu', 'Intel CPU with AVX-512/VNNI detected'
+    except FileNotFoundError:
+        pass
+
+    return 'cpu', 'No acceleration detected, using CPU'
+
+def get_recommended_image():
+    """Get recommended Docker image based on hardware."""
+    accel, reason = detect_acceleration()
+
+    images = {
+        'cuda': 'ghcr.io/collabora/whisperlive-gpu:latest',
+        'openvino': 'ghcr.io/jellman86/whisperlive-openvino:latest',
+        'openvino-cpu': 'ghcr.io/jellman86/whisperlive-openvino:latest',
+        'cpu': 'ghcr.io/collabora/whisperlive:latest',
+    }
+
+    return images[accel], reason
+```
+
+### 6.6 Docker Compose with Auto-Selection
+
+**docker-compose.yml:**
+```yaml
+services:
+  whisper-live:
+    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive:latest}
+    container_name: whisper-live
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      - OPENVINO_DEVICE=${OPENVINO_DEVICE:-AUTO}
+    devices:
+      # Intel GPU passthrough
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    # For NVIDIA (uncomment if using CUDA image)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+```
+
+### 6.7 Intel GPU Device Passthrough
+
+**Required for Intel iGPU/dGPU:**
+```yaml
+services:
+  whisper-live:
+    devices:
+      - /dev/dri:/dev/dri        # GPU device
+    group_add:
+      - video                     # Access to /dev/dri
+      - render                    # For newer kernels
+    environment:
+      - OPENVINO_DEVICE=GPU       # Use GPU
+      # Or AUTO for automatic selection
+```
+
+**Host Requirements:**
+```bash
+# Install Intel compute runtime
+sudo apt install -y intel-opencl-icd intel-level-zero-gpu
+
+# Add user to video/render groups
+sudo usermod -aG video,render $USER
+
+# Verify GPU is accessible
+ls -la /dev/dri/
+# Should show renderD128
+```
+
+### 6.8 OpenVINO Model Optimization
+
+**Whisper Model Conversion:**
+```python
+# scripts/convert_whisper_openvino.py
+from openvino import convert_model, save_model
+from transformers import WhisperForConditionalGeneration
+
+def convert_whisper_to_openvino(model_name: str = "openai/whisper-base.en"):
+    """Convert Whisper model to OpenVINO IR format."""
+
+    # Load HuggingFace model
+    model = WhisperForConditionalGeneration.from_pretrained(model_name)
+
+    # Convert to OpenVINO
+    ov_model = convert_model(model)
+
+    # Apply optimizations
+    from openvino.runtime import Core
+    core = Core()
+
+    # Compress to INT8 for faster inference
+    from openvino.tools import mo
+    compressed_model = mo.compress_model(ov_model, compress_to_fp16=True)
+
+    # Save
+    save_model(compressed_model, f"whisper_openvino/{model_name.split('/')[-1]}.xml")
+
+    return compressed_model
+```
+
+### 6.9 Implementation Tasks
+
+#### Phase 6a: Basic OpenVINO Support
+- [ ] Create OpenVINO WhisperLive Docker image
+- [ ] Test on Intel integrated GPU (common in NUCs, mini PCs)
+- [ ] Document Intel GPU passthrough for Docker
+- [ ] Add `WHISPER_IMAGE` environment variable to compose
+- [ ] Update README with hardware options
+
+#### Phase 6b: Auto-Detection
+- [ ] Implement hardware detection script
+- [ ] Add CLI command: `thewallflower detect-hardware`
+- [ ] Generate `.env` file with recommended settings
+- [ ] Add hardware info to `/api/system/info` endpoint
+
+#### Phase 6c: Model Optimization
+- [ ] Convert Whisper models to OpenVINO IR format
+- [ ] Test INT8 quantization for speed
+- [ ] Benchmark CPU vs iGPU vs dGPU
+- [ ] Publish optimized models
+
+#### Phase 6d: Multi-Backend Support
+- [ ] Abstract backend selection in code
+- [ ] Support runtime backend switching
+- [ ] Add fallback chain (GPU → CPU)
+- [ ] Implement health checks per backend
+
+### 6.10 Performance Expectations
+
+| Hardware | Model | Real-time Factor | Notes |
+|----------|-------|------------------|-------|
+| Intel i5 CPU | base.en | ~0.5x | May struggle with real-time |
+| Intel i7 (AVX-512) | base.en | ~1.2x | Adequate for real-time |
+| Intel iGPU (UHD 630) | base.en | ~2x | Good for real-time |
+| Intel Arc A380 | base.en | ~5x | Excellent |
+| Intel Arc A770 | base.en | ~8x | Near NVIDIA performance |
+
+*Real-time factor: 1x = processes audio as fast as it plays*
+
+### 6.11 Dockerfile Variants
+
+**Create multiple Dockerfiles:**
+```
+docker/
+├── Dockerfile              # Base (CPU only)
+├── Dockerfile.cuda         # NVIDIA GPU
+├── Dockerfile.openvino     # Intel GPU/CPU
+└── Dockerfile.rocm         # AMD GPU (future)
+```
+
+**GitHub Actions for multi-arch builds:**
+```yaml
+# .github/workflows/docker-build.yml
+jobs:
+  build:
+    strategy:
+      matrix:
+        variant: [cpu, cuda, openvino]
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          file: docker/Dockerfile.${{ matrix.variant }}
+          tags: ghcr.io/jellman86/thewallflower-${{ matrix.variant }}:latest
 ```
 
 ---
