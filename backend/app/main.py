@@ -313,13 +313,28 @@ async def video_stream(stream_id: int):
         raise HTTPException(status_code=404, detail="Stream not found or not running")
 
     async def generate():
-        """Generate MJPEG frames."""
+        """Generate MJPEG frames with timeout protection."""
         streamer = worker.mjpeg_streamer
+        no_frame_count = 0
+        max_no_frame_count = 100  # 10 seconds at 0.1s sleep
+
         while True:
+            # Check if worker is still running
+            if not worker.status.is_running:
+                logger.warning(f"Stream {stream_id} stopped, ending video stream")
+                break
+
             frame = await streamer.get_frame()
             if frame is None:
+                no_frame_count += 1
+                if no_frame_count >= max_no_frame_count:
+                    logger.warning(f"Stream {stream_id} no frames for 10s, ending video stream")
+                    break
                 await asyncio.sleep(0.1)
                 continue
+
+            # Reset counter when we get a frame
+            no_frame_count = 0
 
             yield (
                 b"--frame\r\n"
