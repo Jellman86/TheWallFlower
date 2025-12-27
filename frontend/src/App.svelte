@@ -2,6 +2,7 @@
   import { streams, healthCheck } from './lib/services/api.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
+  import StatsPanel from './lib/components/StatsPanel.svelte';
   import Icon from './lib/components/Icons.svelte';
 
   // State
@@ -189,6 +190,9 @@
           />
         </div>
       {:else}
+        <!-- Stats Panel -->
+        <StatsPanel streams={streamList} />
+
         <!-- Grid view -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {#each streamList as stream (stream.id)}

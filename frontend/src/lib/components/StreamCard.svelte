@@ -157,11 +157,22 @@
     <div class="flex items-center gap-2">
       <span class="status-dot {isConnected ? 'connected' : isRunning ? 'connecting' : 'disconnected'}"></span>
       <h3 class="font-medium text-sm truncate">{stream.name}</h3>
-    </div>
-    <div class="flex items-center gap-1">
-      {#if streamStatus?.fps}
-        <span class="text-xs text-[var(--color-text-muted)]">{streamStatus.fps} fps</span>
+      {#if streamStatus?.error}
+        <span class="text-xs text-[var(--color-danger)]" title={streamStatus.error}>!</span>
       {/if}
+    </div>
+    <div class="flex items-center gap-2">
+      <!-- Status indicators -->
+      <div class="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+        {#if streamStatus?.fps}
+          <span class="px-1.5 py-0.5 bg-[var(--color-bg-dark)] rounded">{Math.round(streamStatus.fps)} fps</span>
+        {/if}
+        {#if isRunning && streamStatus?.ffmpeg_restarts > 1}
+          <span class="px-1.5 py-0.5 bg-[var(--color-warning)]/20 text-[var(--color-warning)] rounded" title="FFmpeg restarts">
+            R:{streamStatus.ffmpeg_restarts}
+          </span>
+        {/if}
+      </div>
       <button
         onclick={() => onFocus(stream)}
         class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
@@ -215,13 +226,24 @@
 
   <!-- Transcript area (if enabled) -->
   {#if stream.whisper_enabled && showTranscripts}
-    <div class="transcript-box h-24 overflow-y-auto p-2 bg-black/30 border-t border-[var(--color-border)]">
+    <div class="transcript-box {focused ? 'h-48' : 'h-24'} overflow-y-auto p-2 bg-black/30 border-t border-[var(--color-border)]">
       {#if transcriptList.length > 0}
-        {#each transcriptList as transcript}
-          <p class="text-xs {transcript.is_final ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] italic'}">
-            {transcript.text}
-          </p>
-        {/each}
+        <div class="space-y-1">
+          {#each transcriptList as transcript}
+            <div class="flex gap-2 text-xs">
+              <span class="text-[var(--color-text-muted)] font-mono flex-shrink-0">
+                {#if transcript.created_at}
+                  {new Date(transcript.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})}
+                {:else if transcript.start_time !== undefined}
+                  {Math.floor(transcript.start_time / 60).toString().padStart(2, '0')}:{Math.floor(transcript.start_time % 60).toString().padStart(2, '0')}
+                {/if}
+              </span>
+              <span class="{transcript.is_final ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] italic'}">
+                {transcript.text}
+              </span>
+            </div>
+          {/each}
+        </div>
       {:else}
         <p class="text-xs text-[var(--color-text-muted)] italic">Waiting for speech...</p>
       {/if}
