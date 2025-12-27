@@ -76,29 +76,74 @@ class StreamValidator:
         rtsp_url: str,
         timeout: int
     ) -> StreamMetadata:
-        """Synchronous validation implementation."""
+        """Synchronous validation implementation.
 
+        Tries UDP first (default for RTSP), falls back to TCP if needed.
+        """
+        # Try UDP first (default), then TCP
+        for transport in ["udp", "tcp"]:
+            result = cls._try_ffprobe(rtsp_url, timeout, transport)
+            if result.is_valid:
+                return result
+            # If auth failed or invalid URL, don't retry with different transport
+            if result.error_type in [StreamErrorType.AUTH_FAILED, StreamErrorType.INVALID_URL]:
+                return result
+
+        # Return the last error (TCP attempt)
+        return result
+
+    @classmethod
+    def _try_ffprobe(
+        cls,
+        rtsp_url: str,
+        timeout: int,
+        transport: str = "udp"
+    ) -> StreamMetadata:
+        """Try FFprobe with specific transport."""
+
+        # Convert timeout to microseconds for RTSP-specific options
+        timeout_us = str(timeout * 1000000)
+
+        # Build FFprobe command with proper options
+        # RTSP-specific options must come BEFORE the input URL
         ffprobe_cmd = [
             "ffprobe",
-            "-v", "error",
+            "-v", "error",  # Only show errors (less noise)
+            "-rtsp_transport", transport,
+            "-stimeout", timeout_us,  # RTSP socket timeout (microseconds)
+            "-analyzeduration", "5000000",  # 5 seconds analyze
+            "-probesize", "5000000",  # 5MB probe
             "-print_format", "json",
-            "-show_format",
             "-show_streams",
-            "-rtsp_transport", "tcp",
-            "-stimeout", str(timeout * 1000000),  # microseconds
             rtsp_url
         ]
+
+        # Log command (hide credentials in URL)
+        safe_url = rtsp_url.split('@')[-1] if '@' in rtsp_url else rtsp_url
+        logger.info(f"FFprobe validating ({transport}): rtsp://***@{safe_url}")
 
         try:
             result = subprocess.run(
                 ffprobe_cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout + 5  # Extra buffer for subprocess
+                timeout=timeout + 10  # Extra buffer for subprocess
             )
+
+            logger.debug(f"FFprobe returncode: {result.returncode}")
+            if result.stderr:
+                logger.info(f"FFprobe stderr ({transport}): {result.stderr[:500]}")
 
             if result.returncode != 0:
                 return cls._parse_error(result.stderr, rtsp_url)
+
+            # Check if we got valid JSON output
+            if not result.stdout.strip():
+                return StreamMetadata(
+                    is_valid=False,
+                    error_type=StreamErrorType.UNKNOWN,
+                    error_message="No response from stream"
+                )
 
             return cls._parse_metadata(result.stdout)
 
@@ -128,57 +173,90 @@ class StreamValidator:
         """Parse FFprobe error output to categorize failure."""
         stderr_lower = stderr.lower()
 
+        # Log the full error for debugging
+        logger.debug(f"FFprobe error output: {stderr[:1000]}")
+
+        # Check for authentication errors first (most specific)
         if "401" in stderr or "unauthorized" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.AUTH_FAILED,
                 error_message="Authentication failed - check username/password"
             )
-        elif "connection refused" in stderr_lower:
+
+        # Check for timeout errors
+        if "timeout" in stderr_lower or "timed out" in stderr_lower or "connection timed out" in stderr_lower:
+            return StreamMetadata(
+                is_valid=False,
+                error_type=StreamErrorType.TIMEOUT,
+                error_message="Connection timed out - camera may be slow or unreachable"
+            )
+
+        # Check for connection refused
+        if "connection refused" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNREACHABLE,
                 error_message="Connection refused - check IP address and port"
             )
-        elif "no route" in stderr_lower or "network is unreachable" in stderr_lower:
+
+        # Check for network unreachable
+        if "no route" in stderr_lower or "network is unreachable" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNREACHABLE,
                 error_message="Network unreachable - check network connectivity"
             )
-        elif "name or service not known" in stderr_lower or "could not resolve" in stderr_lower:
+
+        # Check for DNS resolution failures
+        if "name or service not known" in stderr_lower or "could not resolve" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNREACHABLE,
                 error_message="Cannot resolve hostname - check address"
             )
-        elif "invalid" in stderr_lower and "url" in stderr_lower:
+
+        # Check for invalid URL format
+        if "invalid" in stderr_lower and "url" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.INVALID_URL,
                 error_message="Invalid RTSP URL format"
             )
-        elif "404" in stderr or "not found" in stderr_lower:
+
+        # Check for 404 stream not found
+        if "404" in stderr:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNREACHABLE,
-                error_message="Stream path not found on camera"
+                error_message="Stream path not found (404) - check stream path"
             )
-        elif "timeout" in stderr_lower or "timed out" in stderr_lower:
+
+        # Check for generic "not found" but not file not found
+        if "stream not found" in stderr_lower or "method not found" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
-                error_type=StreamErrorType.TIMEOUT,
-                error_message="Connection timed out"
+                error_type=StreamErrorType.UNREACHABLE,
+                error_message="Stream not found - check stream path"
             )
-        else:
-            # Extract first line of error for display
-            error_lines = stderr.strip().split('\n')
-            error_msg = error_lines[0][:200] if error_lines else "Unknown error"
+
+        # Check for I/O errors (often indicates network issues)
+        if "i/o error" in stderr_lower or "input/output error" in stderr_lower:
             return StreamMetadata(
                 is_valid=False,
-                error_type=StreamErrorType.UNKNOWN,
-                error_message=f"Connection failed: {error_msg}"
+                error_type=StreamErrorType.UNREACHABLE,
+                error_message="I/O error - connection interrupted"
             )
+
+        # Extract first meaningful line of error for display
+        error_lines = [line.strip() for line in stderr.strip().split('\n') if line.strip()]
+        error_msg = error_lines[0][:200] if error_lines else "Unknown error"
+
+        return StreamMetadata(
+            is_valid=False,
+            error_type=StreamErrorType.UNKNOWN,
+            error_message=f"Connection failed: {error_msg}"
+        )
 
     @classmethod
     def _parse_metadata(cls, stdout: str) -> StreamMetadata:
