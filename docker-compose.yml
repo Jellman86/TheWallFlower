@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   thewallflower:
     image: ghcr.io/jellman86/thewallflower:latest
