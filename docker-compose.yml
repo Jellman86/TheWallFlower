@@ -51,14 +51,19 @@ services:
     restart: unless-stopped
     networks:
       - default
+    #
+    # ============ GPU ACCELERATION (uncomment ONE section) ============
+    #
     # Intel GPU support - uncomment for Intel iGPU/Arc acceleration
-    devices:
-       - /dev/dri:/dev/dri
-    group_add:
-       - video
-       - render
+    # Also set WHISPER_IMAGE=ghcr.io/collabora/whisperlive-openvino:latest
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "44"    # video group GID (use number to avoid group name issues)
+    #   - "109"   # render group GID (may vary - check with: getent group render)
     #
     # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration
+    # Also set WHISPER_IMAGE=ghcr.io/collabora/whisperlive-gpu:latest
     # deploy:
     #   resources:
     #     reservations:
