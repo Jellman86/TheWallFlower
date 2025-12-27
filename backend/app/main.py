@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -400,17 +401,27 @@ def get_all_status() -> Dict[str, Any]:
 # =============================================================================
 
 @app.get("/api/video/{stream_id}")
-async def video_stream(stream_id: int):
-    """MJPEG video stream for a specific camera."""
+async def video_stream(stream_id: int, max_fps: int = 10):
+    """MJPEG video stream for a specific camera.
+
+    Args:
+        stream_id: The stream to watch
+        max_fps: Maximum frames per second to send (default 10, max 30)
+    """
     worker = stream_manager.get_worker(stream_id)
     if not worker or not worker.mjpeg_streamer:
         raise HTTPException(status_code=404, detail="Stream not found or not running")
 
+    # Clamp max_fps to reasonable range
+    max_fps = max(1, min(max_fps, 30))
+    min_frame_interval = 1.0 / max_fps
+
     async def generate():
-        """Generate MJPEG frames with timeout protection."""
+        """Generate MJPEG frames with timeout protection and rate limiting."""
         streamer = worker.mjpeg_streamer
         no_frame_count = 0
         max_no_frame_count = 100  # 10 seconds at 0.1s sleep
+        last_frame_time = 0.0
 
         while True:
             # Check if worker is still running
@@ -429,6 +440,13 @@ async def video_stream(stream_id: int):
 
             # Reset counter when we get a frame
             no_frame_count = 0
+
+            # Rate limiting - skip frame if too soon
+            current_time = time.monotonic()
+            if current_time - last_frame_time < min_frame_interval:
+                await asyncio.sleep(0.01)  # Small sleep to prevent busy loop
+                continue
+            last_frame_time = current_time
 
             yield (
                 b"--frame\r\n"
