@@ -651,11 +651,11 @@ Intel's OpenVINO toolkit provides optimized inference for:
 # docker-compose.yml - Image selection via environment
 services:
   whisper-live:
-    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive:latest}
-    # Variants:
-    # - ghcr.io/collabora/whisperlive:latest       (CPU only)
-    # - ghcr.io/collabora/whisperlive-gpu:latest   (NVIDIA CUDA)
-    # - ghcr.io/jellman86/whisperlive-openvino:latest (Intel OpenVINO)
+    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive-cpu:latest}
+    # Official Collabora images:
+    # - ghcr.io/collabora/whisperlive-cpu:latest      (CPU only)
+    # - ghcr.io/collabora/whisperlive-gpu:latest      (NVIDIA CUDA)
+    # - ghcr.io/collabora/whisperlive-openvino:latest (Intel OpenVINO)
 ```
 
 **Environment Variables:**
@@ -663,49 +663,28 @@ services:
 # .env file examples
 
 # Default (CPU)
-WHISPER_IMAGE=ghcr.io/collabora/whisperlive:latest
+WHISPER_IMAGE=ghcr.io/collabora/whisperlive-cpu:latest
 
 # NVIDIA GPU
 WHISPER_IMAGE=ghcr.io/collabora/whisperlive-gpu:latest
 
-# Intel GPU/CPU with OpenVINO
-WHISPER_IMAGE=ghcr.io/jellman86/whisperlive-openvino:latest
+# Intel GPU/CPU with OpenVINO (official Collabora image)
+WHISPER_IMAGE=ghcr.io/collabora/whisperlive-openvino:latest
 ```
 
-### 6.4 OpenVINO WhisperLive Image
+### 6.4 Official OpenVINO Image
 
-**Dockerfile.openvino:**
-```dockerfile
-FROM openvino/ubuntu22_runtime:latest
+Collabora provides an official OpenVINO-enabled WhisperLive image:
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    whisper \
-    faster-whisper \
-    openvino \
-    openvino-genai \
-    websockets \
-    numpy
+```bash
+# Pull the official OpenVINO image
+docker pull ghcr.io/collabora/whisperlive-openvino:latest
 
-# OpenVINO optimized Whisper model
-# Convert whisper model to OpenVINO IR format
-RUN python -c "
-from openvino import convert_model
-import whisper
-model = whisper.load_model('base.en')
-# Export and optimize for OpenVINO
-"
-
-# Device selection via environment
-ENV OPENVINO_DEVICE=GPU
-# Options: CPU, GPU, AUTO, MULTI:CPU,GPU
-
-COPY whisper_server_openvino.py /app/
-WORKDIR /app
-
-EXPOSE 9090
-CMD ["python", "whisper_server_openvino.py"]
+# Run with Intel GPU passthrough
+docker run -it --device=/dev/dri -p 9090:9090 ghcr.io/collabora/whisperlive-openvino:latest
 ```
+
+**Note:** Running WhisperLive with OpenVINO inside Docker automatically enables GPU support (iGPU/dGPU) without requiring additional host setup. The first run may be slow as OpenVINO compiles the model to a device-specific blob, which is cached for subsequent runs.
 
 ### 6.5 Device Auto-Detection
 
@@ -754,9 +733,9 @@ def get_recommended_image():
 
     images = {
         'cuda': 'ghcr.io/collabora/whisperlive-gpu:latest',
-        'openvino': 'ghcr.io/jellman86/whisperlive-openvino:latest',
-        'openvino-cpu': 'ghcr.io/jellman86/whisperlive-openvino:latest',
-        'cpu': 'ghcr.io/collabora/whisperlive:latest',
+        'openvino': 'ghcr.io/collabora/whisperlive-openvino:latest',
+        'openvino-cpu': 'ghcr.io/collabora/whisperlive-openvino:latest',
+        'cpu': 'ghcr.io/collabora/whisperlive-cpu:latest',
     }
 
     return images[accel], reason

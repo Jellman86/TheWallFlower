@@ -32,16 +32,16 @@ services:
       - default
 
   whisper-live:
-    # Image selection: CPU, NVIDIA CUDA, or Intel OpenVINO
-    # Set WHISPER_IMAGE in .env or environment
-    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive:latest}
+    # Image selection - set WHISPER_IMAGE in .env:
+    #   CPU only:    ghcr.io/collabora/whisperlive-cpu:latest
+    #   NVIDIA GPU:  ghcr.io/collabora/whisperlive-gpu:latest
+    #   Intel GPU:   ghcr.io/collabora/whisperlive-openvino:latest
+    image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive-cpu:latest}
     container_name: whisper-live
     ports:
       - "${WHISPER_PORT:-9090}:9090"
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
-      # For OpenVINO: AUTO, CPU, GPU, or MULTI:CPU,GPU
-      - OPENVINO_DEVICE=${OPENVINO_DEVICE:-AUTO}
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
       interval: 10s
@@ -52,11 +52,11 @@ services:
     networks:
       - default
     # Intel GPU support - uncomment for Intel iGPU/Arc acceleration
-    # devices:
-    #   - /dev/dri:/dev/dri
-    # group_add:
-    #   - video
-    #   - render
+    devices:
+       - /dev/dri:/dev/dri
+    group_add:
+       - video
+       - render
     #
     # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration
     # deploy:
