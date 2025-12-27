@@ -16,12 +16,16 @@
   let eventSource = $state(null);
   let reconnectTimeout = $state(null);
 
-  // Image error handling
+  // Image error handling - use a stable cache buster that only changes on manual retry
   let imageError = $state(false);
   let imageRetryCount = $state(0);
   let imageRetryTimeout = $state(null);
+  let imageCacheBuster = $state(Date.now()); // Only changes on explicit retry
   let isForceRetrying = $state(false);
   let sseError = $state(null);
+
+  // Max retries before giving up on image
+  const MAX_IMAGE_RETRIES = 5;
 
   // Derived state
   let isRunning = $derived(streamStatus?.is_running ?? false);
@@ -42,27 +46,51 @@
     return 'connecting';
   });
 
+  // Whether to show the image (connected and not too many errors)
+  let showImage = $derived(isConnected && !imageError && imageRetryCount < MAX_IMAGE_RETRIES);
+
   // Connect to SSE for real-time updates
   $effect(() => {
-    if (stream?.id) {
-      // Initial fetch for immediate data
-      fetchStatus();
-      if (stream.whisper_enabled) {
-        fetchTranscripts();
-      }
+    const currentStreamId = stream?.id;
+    if (!currentStreamId) return;
 
-      // Connect to SSE
-      connectSSE();
+    // Initial fetch for immediate data
+    fetchStatus();
+    if (stream.whisper_enabled) {
+      fetchTranscripts();
     }
 
+    // Connect to SSE
+    connectSSE();
+
+    // Cleanup function
     return () => {
-      disconnectSSE();
+      cleanupAll();
     };
   });
 
-  function connectSSE() {
+  function cleanupAll() {
+    // Clear all timeouts
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (imageRetryTimeout) {
+      clearTimeout(imageRetryTimeout);
+      imageRetryTimeout = null;
+    }
+    // Close SSE
     if (eventSource) {
       eventSource.close();
+      eventSource = null;
+    }
+  }
+
+  function connectSSE() {
+    // Close existing connection first
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
     }
 
     const url = `${API_BASE}/streams/${stream.id}/events`;
@@ -72,6 +100,12 @@
       try {
         const data = JSON.parse(event.data);
         streamStatus = data.data;
+        // Reset image error state when status shows connected
+        if (data.data?.video_connected && imageError) {
+          imageError = false;
+          imageRetryCount = 0;
+          imageCacheBuster = Date.now(); // Force reload with new cache buster
+        }
       } catch (e) {
         console.error('Failed to parse status event:', e);
       }
@@ -94,16 +128,18 @@
         sseError = data.data?.error || 'Stream error occurred';
         console.error('Stream error:', data.data?.error);
       } catch (e) {
-        // Connection error, not a data error
+        // Connection error, not a data error - ignore parse errors
       }
     });
 
     eventSource.onerror = () => {
       sseError = 'Connection to server lost';
-      eventSource?.close();
-      eventSource = null;
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
 
-      // Reconnect after 5 seconds
+      // Reconnect after 5 seconds - but only if we haven't been cleaned up
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       reconnectTimeout = setTimeout(() => {
         if (stream?.id) {
@@ -115,15 +151,24 @@
   }
 
   function handleImageError() {
+    // Only handle error if we haven't exceeded max retries
+    if (imageRetryCount >= MAX_IMAGE_RETRIES) {
+      imageError = true;
+      return;
+    }
+
     imageError = true;
     imageRetryCount++;
 
-    // Exponential backoff for image retries
-    const delay = Math.min(1000 * Math.pow(2, imageRetryCount - 1), 30000);
+    // Exponential backoff for image retries (1s, 2s, 4s, 8s, 16s)
+    const delay = Math.min(1000 * Math.pow(2, imageRetryCount - 1), 16000);
 
     if (imageRetryTimeout) clearTimeout(imageRetryTimeout);
     imageRetryTimeout = setTimeout(() => {
-      imageError = false;
+      if (imageRetryCount < MAX_IMAGE_RETRIES) {
+        imageError = false;
+        imageCacheBuster = Date.now(); // Update cache buster for retry
+      }
     }, delay);
   }
 
@@ -132,11 +177,18 @@
     imageRetryCount = 0;
   }
 
+  function handleManualImageRetry() {
+    imageError = false;
+    imageRetryCount = 0;
+    imageCacheBuster = Date.now();
+  }
+
   async function handleForceRetry() {
     isForceRetrying = true;
     try {
       await control.forceRetry(stream.id);
-      // Status will update via SSE
+      // Reset image state
+      handleManualImageRetry();
     } catch (e) {
       console.error('Failed to force retry:', e);
     }
@@ -175,6 +227,8 @@
     isLoading = true;
     try {
       await control.start(stream.id);
+      // Reset image state for fresh start
+      handleManualImageRetry();
       await fetchStatus();
     } catch (e) {
       console.error('Failed to start stream:', e);
@@ -197,6 +251,8 @@
     isLoading = true;
     try {
       await control.restart(stream.id);
+      // Reset image state for fresh start
+      handleManualImageRetry();
       await fetchStatus();
     } catch (e) {
       console.error('Failed to restart stream:', e);
@@ -254,9 +310,9 @@
 
   <!-- Video with error handling -->
   <div class="relative">
-    {#if isConnected && !imageError}
+    {#if showImage}
       <img
-        src="{video.streamUrl(stream.id)}?t={Date.now()}"
+        src="{video.streamUrl(stream.id)}?t={imageCacheBuster}"
         alt={stream.name}
         class="stream-video"
         onerror={handleImageError}
@@ -265,10 +321,20 @@
     {:else}
       <div class="stream-video flex items-center justify-center bg-black">
         <div class="text-center p-4">
-          {#if displayState === 'connected' && imageError}
+          {#if displayState === 'connected' && (imageError || imageRetryCount >= MAX_IMAGE_RETRIES)}
             <Icon name="alert-triangle" size={24} class="mx-auto mb-2 text-[var(--color-warning)]" />
             <div class="text-[var(--color-warning)] text-sm">Stream error</div>
-            <div class="text-[var(--color-text-muted)] text-xs mt-1">Retrying... ({imageRetryCount})</div>
+            {#if imageRetryCount >= MAX_IMAGE_RETRIES}
+              <div class="text-[var(--color-text-muted)] text-xs mt-1">Max retries reached</div>
+              <button
+                onclick={handleManualImageRetry}
+                class="mt-2 px-3 py-1 text-xs bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
+              >
+                Retry
+              </button>
+            {:else}
+              <div class="text-[var(--color-text-muted)] text-xs mt-1">Retrying... ({imageRetryCount}/{MAX_IMAGE_RETRIES})</div>
+            {/if}
           {:else if displayState === 'connecting'}
             <div class="animate-pulse text-[var(--color-warning)]">Connecting...</div>
           {:else if displayState === 'retrying'}

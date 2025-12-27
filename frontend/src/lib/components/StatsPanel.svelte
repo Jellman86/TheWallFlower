@@ -6,6 +6,7 @@
 
   let allStatus = $state({});
   let isLoading = $state(true);
+  let lastFetchedCount = $state(-1); // Track to prevent duplicate fetches
 
   // Derived stats
   let totalStreams = $derived(streams.length);
@@ -22,9 +23,11 @@
     Object.values(allStatus).filter(s => s?.whisper_connected).length
   );
 
-  // Fetch all stream statuses
+  // Fetch all stream statuses - only when stream count changes
   $effect(() => {
-    if (streams.length > 0) {
+    const count = streams.length;
+    if (count > 0 && count !== lastFetchedCount) {
+      lastFetchedCount = count;
       fetchAllStatus();
     }
   });

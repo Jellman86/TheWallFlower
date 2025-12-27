@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import { streams, healthCheck } from './lib/services/api.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
@@ -19,10 +20,16 @@
   let viewMode = $state('grid'); // 'grid' or 'focus'
   let focusedStream = $state(null);
 
-  // Load streams on mount
+  // Load streams on mount - use untrack to prevent re-runs
+  let initialized = false;
   $effect(() => {
-    loadStreams();
-    checkHealth();
+    if (!initialized) {
+      initialized = true;
+      untrack(() => {
+        loadStreams();
+        checkHealth();
+      });
+    }
   });
 
   async function checkHealth() {
