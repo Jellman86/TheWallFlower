@@ -26,6 +26,7 @@ from app.worker import StreamStatus
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
 from app.models import Transcript, TranscriptRead
+from app.routers import debug as debug_router
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +68,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(debug_router.router)
 
 
 # =============================================================================
