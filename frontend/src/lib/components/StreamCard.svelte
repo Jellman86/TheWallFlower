@@ -16,10 +16,31 @@
   let eventSource = $state(null);
   let reconnectTimeout = $state(null);
 
+  // Image error handling
+  let imageError = $state(false);
+  let imageRetryCount = $state(0);
+  let imageRetryTimeout = $state(null);
+  let isForceRetrying = $state(false);
+  let sseError = $state(null);
+
   // Derived state
   let isRunning = $derived(streamStatus?.is_running ?? false);
   let isConnected = $derived(streamStatus?.video_connected ?? false);
   let hasWhisper = $derived(stream.whisper_enabled && streamStatus?.whisper_connected);
+
+  // Enhanced connection state
+  let connectionState = $derived(streamStatus?.connection_state ?? 'stopped');
+  let retryCount = $derived(streamStatus?.retry_count ?? 0);
+  let circuitBreakerOpen = $derived(streamStatus?.circuit_breaker_state === 'open');
+
+  // Computed display state
+  let displayState = $derived.by(() => {
+    if (!isRunning) return 'stopped';
+    if (circuitBreakerOpen) return 'failed';
+    if (connectionState === 'connected' && isConnected) return 'connected';
+    if (connectionState === 'retrying') return 'retrying';
+    return 'connecting';
+  });
 
   // Connect to SSE for real-time updates
   $effect(() => {
@@ -70,6 +91,7 @@
     eventSource.addEventListener('error', (event) => {
       try {
         const data = JSON.parse(event.data);
+        sseError = data.data?.error || 'Stream error occurred';
         console.error('Stream error:', data.data?.error);
       } catch (e) {
         // Connection error, not a data error
@@ -77,16 +99,48 @@
     });
 
     eventSource.onerror = () => {
-      // SSE connection failed, try to reconnect after delay
+      sseError = 'Connection to server lost';
       eventSource?.close();
       eventSource = null;
 
       // Reconnect after 5 seconds
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       reconnectTimeout = setTimeout(() => {
-        if (stream?.id) connectSSE();
+        if (stream?.id) {
+          sseError = null;
+          connectSSE();
+        }
       }, 5000);
     };
+  }
+
+  function handleImageError() {
+    imageError = true;
+    imageRetryCount++;
+
+    // Exponential backoff for image retries
+    const delay = Math.min(1000 * Math.pow(2, imageRetryCount - 1), 30000);
+
+    if (imageRetryTimeout) clearTimeout(imageRetryTimeout);
+    imageRetryTimeout = setTimeout(() => {
+      imageError = false;
+    }, delay);
+  }
+
+  function handleImageLoad() {
+    imageError = false;
+    imageRetryCount = 0;
+  }
+
+  async function handleForceRetry() {
+    isForceRetrying = true;
+    try {
+      await control.forceRetry(stream.id);
+      // Status will update via SSE
+    } catch (e) {
+      console.error('Failed to force retry:', e);
+    }
+    isForceRetrying = false;
   }
 
   function disconnectSSE() {
@@ -155,7 +209,7 @@
   <!-- Header -->
   <div class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-hover)]">
     <div class="flex items-center gap-2">
-      <span class="status-dot {isConnected ? 'connected' : isRunning ? 'connecting' : 'disconnected'}"></span>
+      <span class="status-dot {displayState === 'connected' ? 'connected' : displayState === 'retrying' || displayState === 'connecting' ? 'connecting' : 'disconnected'}"></span>
       <h3 class="font-medium text-sm truncate">{stream.name}</h3>
       {#if streamStatus?.error}
         <span class="text-xs text-[var(--color-danger)]" title={streamStatus.error}>!</span>
@@ -164,7 +218,15 @@
     <div class="flex items-center gap-2">
       <!-- Status indicators -->
       <div class="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
-        {#if streamStatus?.fps}
+        {#if displayState === 'retrying'}
+          <span class="px-1.5 py-0.5 bg-[var(--color-warning)]/20 text-[var(--color-warning)] rounded animate-pulse">
+            Retry #{retryCount}
+          </span>
+        {:else if displayState === 'failed'}
+          <span class="px-1.5 py-0.5 bg-[var(--color-danger)]/20 text-[var(--color-danger)] rounded">
+            Failed
+          </span>
+        {:else if streamStatus?.fps}
           <span class="px-1.5 py-0.5 bg-[var(--color-bg-dark)] rounded">{Math.round(streamStatus.fps)} fps</span>
         {/if}
         {#if isRunning && streamStatus?.ffmpeg_restarts > 1}
@@ -190,25 +252,58 @@
     </div>
   </div>
 
-  <!-- Video -->
+  <!-- Video with error handling -->
   <div class="relative">
-    {#if isConnected}
+    {#if isConnected && !imageError}
       <img
-        src={video.streamUrl(stream.id)}
+        src="{video.streamUrl(stream.id)}?t={Date.now()}"
         alt={stream.name}
         class="stream-video"
+        onerror={handleImageError}
+        onload={handleImageLoad}
       />
     {:else}
       <div class="stream-video flex items-center justify-center bg-black">
-        <div class="text-center">
-          {#if isRunning}
+        <div class="text-center p-4">
+          {#if displayState === 'connected' && imageError}
+            <Icon name="alert-triangle" size={24} class="mx-auto mb-2 text-[var(--color-warning)]" />
+            <div class="text-[var(--color-warning)] text-sm">Stream error</div>
+            <div class="text-[var(--color-text-muted)] text-xs mt-1">Retrying... ({imageRetryCount})</div>
+          {:else if displayState === 'connecting'}
             <div class="animate-pulse text-[var(--color-warning)]">Connecting...</div>
+          {:else if displayState === 'retrying'}
+            <Icon name="rotate" size={24} class="mx-auto mb-2 text-[var(--color-warning)] animate-spin" />
+            <div class="text-[var(--color-warning)] text-sm">Reconnecting</div>
+            <div class="text-[var(--color-text-muted)] text-xs mt-1">Attempt {retryCount}</div>
+          {:else if displayState === 'failed'}
+            <Icon name="x" size={32} class="mx-auto mb-2 text-[var(--color-danger)]" />
+            <div class="text-[var(--color-danger)] text-sm font-medium">Connection Failed</div>
+            <div class="text-[var(--color-text-muted)] text-xs mt-1 max-w-48">
+              {streamStatus?.error || 'Unable to connect after multiple attempts'}
+            </div>
+            <button
+              onclick={handleForceRetry}
+              disabled={isForceRetrying}
+              class="mt-3 px-3 py-1.5 text-xs bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors disabled:opacity-50"
+            >
+              {#if isForceRetrying}
+                <Icon name="rotate" size={14} class="inline animate-spin mr-1" />
+              {/if}
+              Retry Now
+            </button>
           {:else if streamStatus?.error}
             <div class="text-[var(--color-danger)] text-sm">{streamStatus.error}</div>
           {:else}
             <div class="text-[var(--color-text-muted)]">Stream stopped</div>
           {/if}
         </div>
+      </div>
+    {/if}
+
+    <!-- SSE Error Banner -->
+    {#if sseError}
+      <div class="absolute bottom-0 left-0 right-0 bg-[var(--color-danger)]/90 text-white text-xs px-2 py-1">
+        {sseError}
       </div>
     {/if}
 

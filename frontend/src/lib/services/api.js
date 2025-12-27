@@ -116,6 +116,24 @@ export const control = {
       method: 'POST'
     });
     return handleResponse(response);
+  },
+
+  /**
+   * Force retry a stream connection (resets circuit breaker).
+   */
+  async forceRetry(id) {
+    const response = await fetch(`${BASE_URL}/streams/${id}/force-retry`, {
+      method: 'POST'
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Get stream diagnostics including validation and worker status.
+   */
+  async getDiagnostics(id) {
+    const response = await fetch(`${BASE_URL}/streams/${id}/diagnostics`);
+    return handleResponse(response);
   }
 };
 

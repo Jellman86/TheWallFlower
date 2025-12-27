@@ -210,11 +210,52 @@
             Include credentials if required: rtsp://user:pass@host:port/path
           </p>
           {#if testResult}
-            <div class="mt-2 p-2 rounded text-xs {testResult.success ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-danger)]/20 text-[var(--color-danger)]'}">
+            <div class="mt-2 p-3 rounded text-xs {testResult.success ? 'bg-[var(--color-success)]/20' : 'bg-[var(--color-danger)]/20'}">
               {#if testResult.success}
-                ✓ Connection successful ({testResult.resolution})
+                <div class="text-[var(--color-success)] font-medium mb-1">Connection successful</div>
+                {#if testResult.metadata}
+                  <div class="text-[var(--color-text-muted)] space-y-0.5">
+                    <div>Resolution: {testResult.metadata.resolution}</div>
+                    <div>Codec: {testResult.metadata.codec}</div>
+                    {#if testResult.metadata.fps}
+                      <div>FPS: {testResult.metadata.fps}</div>
+                    {/if}
+                    {#if testResult.metadata.bitrate_kbps}
+                      <div>Bitrate: {testResult.metadata.bitrate_kbps} kbps</div>
+                    {/if}
+                    {#if testResult.metadata.has_audio}
+                      <div>Audio: {testResult.metadata.audio_codec}</div>
+                    {/if}
+                  </div>
+                {/if}
               {:else}
-                ✗ {testResult.error}
+                <div class="text-[var(--color-danger)] font-medium mb-1">
+                  {#if testResult.error_type === 'auth_failed'}
+                    Authentication Failed
+                  {:else if testResult.error_type === 'unreachable'}
+                    Host Unreachable
+                  {:else if testResult.error_type === 'timeout'}
+                    Connection Timeout
+                  {:else}
+                    Connection Failed
+                  {/if}
+                </div>
+                <div class="text-[var(--color-text-muted)]">{testResult.error}</div>
+
+                <!-- Helpful hints based on error type -->
+                {#if testResult.error_type === 'auth_failed'}
+                  <div class="mt-2 text-[var(--color-text-muted)] italic">
+                    Tip: Check your username and password in the URL
+                  </div>
+                {:else if testResult.error_type === 'unreachable'}
+                  <div class="mt-2 text-[var(--color-text-muted)] italic">
+                    Tip: Verify the IP address, port, and that the camera is powered on
+                  </div>
+                {:else if testResult.error_type === 'timeout'}
+                  <div class="mt-2 text-[var(--color-text-muted)] italic">
+                    Tip: The camera may be slow to respond or on a different network
+                  </div>
+                {/if}
               {/if}
             </div>
           {/if}

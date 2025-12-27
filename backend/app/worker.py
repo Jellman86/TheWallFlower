@@ -10,7 +10,8 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import List, Optional, Callable
 import json
 
@@ -27,8 +28,29 @@ logger = logging.getLogger(__name__)
 
 # Reconnection backoff configuration
 WHISPER_RECONNECT_BACKOFF = [1, 2, 5, 10, 30, 60]  # seconds
+VIDEO_RECONNECT_BACKOFF = [1, 2, 4, 8, 16, 30, 60, 120]  # seconds, exponential
 FFMPEG_RESTART_DELAY = 2  # seconds
 THREAD_HEALTH_CHECK_INTERVAL = 10  # seconds
+
+# Circuit breaker configuration
+MAX_CONSECUTIVE_FAILURES = 10  # Before circuit breaker opens
+CIRCUIT_BREAKER_RESET_TIME = 300  # 5 minutes before half-open
+
+
+class ConnectionState(str, Enum):
+    """Stream connection states."""
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    RETRYING = "retrying"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class CircuitBreakerState(str, Enum):
+    """Circuit breaker states."""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing, rejecting connections
+    HALF_OPEN = "half_open"  # Testing if recovered
 
 
 @dataclass
@@ -58,6 +80,13 @@ class StreamStatus:
     whisper_reconnects: int = 0
     last_frame_time: Optional[datetime] = None
     last_audio_time: Optional[datetime] = None
+    # Enhanced connection tracking
+    connection_state: ConnectionState = ConnectionState.STOPPED
+    retry_count: int = 0
+    next_retry_time: Optional[datetime] = None
+    last_successful_connection: Optional[datetime] = None
+    circuit_breaker_state: CircuitBreakerState = CircuitBreakerState.CLOSED
+    consecutive_failures: int = 0
 
 
 class StreamWorker:
@@ -115,6 +144,12 @@ class StreamWorker:
             "audio_thread_alive": status.audio_thread_alive,
             "ffmpeg_restarts": status.ffmpeg_restarts,
             "whisper_reconnects": status.whisper_reconnects,
+            # Enhanced connection tracking
+            "connection_state": status.connection_state.value,
+            "retry_count": status.retry_count,
+            "next_retry_time": status.next_retry_time.isoformat() if status.next_retry_time else None,
+            "circuit_breaker_state": status.circuit_breaker_state.value,
+            "consecutive_failures": status.consecutive_failures,
         })
 
     @property
@@ -248,33 +283,93 @@ class StreamWorker:
             processor.start()
 
     def _video_loop(self) -> None:
-        """Main video capture and processing loop."""
+        """Main video capture and processing loop with exponential backoff and circuit breaker."""
         logger.info(f"Video thread started for stream {self.config.id}")
 
         cap = None
         retry_count = 0
-        max_retries = 5
-        processor_failures: dict[str, int] = {}  # Track processor failure counts
+        processor_failures: dict[str, int] = {}
+        circuit_breaker_opened_at: Optional[float] = None
 
         while not self._stop_event.is_set():
+            # Circuit breaker check
+            if self._status.circuit_breaker_state == CircuitBreakerState.OPEN:
+                if circuit_breaker_opened_at is None:
+                    circuit_breaker_opened_at = time.time()
+
+                time_since_open = time.time() - circuit_breaker_opened_at
+                if time_since_open < CIRCUIT_BREAKER_RESET_TIME:
+                    # Still in cooldown - wait and check periodically
+                    remaining = int(CIRCUIT_BREAKER_RESET_TIME - time_since_open)
+                    self._status.connection_state = ConnectionState.FAILED
+                    self._status.error = f"Connection failed repeatedly. Auto-retry in {remaining}s"
+                    self._emit_status_event()
+                    time.sleep(10)
+                    continue
+                else:
+                    # Try half-open state
+                    self._status.circuit_breaker_state = CircuitBreakerState.HALF_OPEN
+                    circuit_breaker_opened_at = None
+                    logger.info(f"Stream {self.config.id}: Circuit breaker half-open, attempting reconnection")
+
             try:
                 # Open video capture
                 if cap is None or not cap.isOpened():
-                    logger.info(f"Connecting to RTSP: {self.config.rtsp_url}")
-                    cap = cv2.VideoCapture(self.config.rtsp_url)
+                    self._status.connection_state = (
+                        ConnectionState.CONNECTING if retry_count == 0
+                        else ConnectionState.RETRYING
+                    )
+                    self._status.retry_count = retry_count
+                    self._emit_status_event()
+
+                    logger.info(f"Connecting to RTSP (attempt {retry_count + 1}): {self.config.rtsp_url}")
+
+                    # Use FFMPEG backend for better RTSP support
+                    cap = cv2.VideoCapture(self.config.rtsp_url, cv2.CAP_FFMPEG)
+
+                    # Set timeouts (OpenCV 4.5+)
+                    try:
+                        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)  # 10s connection timeout
+                        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)   # 5s read timeout
+                    except Exception:
+                        pass  # Older OpenCV versions may not support these
+
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
 
                     if not cap.isOpened():
                         retry_count += 1
-                        if retry_count > max_retries:
-                            self._status.error = "Failed to connect to RTSP stream"
-                            logger.error(f"Stream {self.config.id}: {self._status.error}")
+                        self._status.consecutive_failures += 1
+
+                        # Check circuit breaker threshold
+                        if self._status.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                            self._status.circuit_breaker_state = CircuitBreakerState.OPEN
+                            self._status.connection_state = ConnectionState.FAILED
+                            self._status.error = f"Connection failed {MAX_CONSECUTIVE_FAILURES} times - pausing retries"
+                            circuit_breaker_opened_at = time.time()
+                            logger.error(f"Stream {self.config.id}: Circuit breaker opened after {MAX_CONSECUTIVE_FAILURES} failures")
                             self._emit_status_event()
-                            break
-                        time.sleep(2)
+                            continue
+
+                        # Exponential backoff
+                        backoff_idx = min(retry_count - 1, len(VIDEO_RECONNECT_BACKOFF) - 1)
+                        delay = VIDEO_RECONNECT_BACKOFF[backoff_idx]
+
+                        self._status.next_retry_time = datetime.now() + timedelta(seconds=delay)
+                        self._status.error = f"Connection failed, retry #{retry_count} in {delay}s"
+                        self._emit_status_event()
+
+                        logger.warning(f"Stream {self.config.id}: Retry {retry_count}, waiting {delay}s")
+                        time.sleep(delay)
                         continue
 
+                    # Success!
                     self._status.video_connected = True
+                    self._status.connection_state = ConnectionState.CONNECTED
                     self._status.error = None
+                    self._status.consecutive_failures = 0
+                    self._status.circuit_breaker_state = CircuitBreakerState.CLOSED
+                    self._status.last_successful_connection = datetime.now()
+                    self._status.next_retry_time = None
                     retry_count = 0
                     logger.info(f"Connected to stream {self.config.id}")
                     self._emit_status_event()
@@ -286,6 +381,7 @@ class StreamWorker:
                     cap.release()
                     cap = None
                     self._status.video_connected = False
+                    self._status.connection_state = ConnectionState.RETRYING
                     self._emit_status_event()
                     time.sleep(1)
                     continue
@@ -297,10 +393,8 @@ class StreamWorker:
                 for processor in self._processors:
                     try:
                         frame = processor.process(frame)
-                        # Reset failure count on success
                         processor_failures[processor.name] = 0
                     except Exception as e:
-                        # Track failures per processor
                         processor_failures[processor.name] = processor_failures.get(processor.name, 0) + 1
                         failure_count = processor_failures[processor.name]
 
@@ -308,7 +402,6 @@ class StreamWorker:
                             logger.error(f"Processor {processor.name} error ({failure_count}): {e}")
                         elif failure_count == 4:
                             logger.error(f"Processor {processor.name} failing repeatedly, suppressing logs")
-                        # Continue with other processors even if one fails
 
             except Exception as e:
                 logger.error(f"Video loop error for stream {self.config.id}: {e}")
@@ -316,12 +409,19 @@ class StreamWorker:
                 if cap:
                     cap.release()
                     cap = None
-                time.sleep(2)
+                retry_count += 1
+                self._status.consecutive_failures += 1
+
+                # Exponential backoff on exception too
+                backoff_idx = min(retry_count - 1, len(VIDEO_RECONNECT_BACKOFF) - 1)
+                delay = VIDEO_RECONNECT_BACKOFF[backoff_idx]
+                time.sleep(delay)
 
         # Cleanup
         if cap:
             cap.release()
         self._status.video_connected = False
+        self._status.connection_state = ConnectionState.STOPPED
         logger.info(f"Video thread stopped for stream {self.config.id}")
 
     def _audio_loop(self) -> None:

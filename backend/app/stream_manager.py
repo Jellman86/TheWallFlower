@@ -15,9 +15,16 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.db import engine
 from app.models import StreamConfig
-from app.worker import StreamWorker, StreamStatus, TranscriptSegment
+from app.worker import (
+    StreamWorker, StreamStatus, TranscriptSegment,
+    ConnectionState, CircuitBreakerState
+)
 
 logger = logging.getLogger(__name__)
+
+# Health monitor configuration
+HEALTH_CHECK_INTERVAL = 10  # seconds
+FRAME_TIMEOUT_THRESHOLD = 30  # seconds without frame = stale
 
 
 class StreamManager:
@@ -54,6 +61,10 @@ class StreamManager:
 
         # Callback for transcript updates (for SSE/WebSocket broadcasting)
         self._transcript_callbacks: List[Callable[[int, TranscriptSegment], None]] = []
+
+        # Health monitor thread
+        self._health_thread: Optional[threading.Thread] = None
+        self._health_check_interval = HEALTH_CHECK_INTERVAL
 
         # Register shutdown handlers
         atexit.register(self._atexit_handler)
@@ -209,6 +220,9 @@ class StreamManager:
         for stream in streams:
             self.start_stream(stream.id)
 
+        # Start health monitor
+        self._start_health_monitor()
+
     def stop_all(self) -> None:
         """Stop all running workers."""
         logger.info("Stopping all streams")
@@ -218,6 +232,116 @@ class StreamManager:
 
         for stream_id in stream_ids:
             self.stop_stream(stream_id)
+
+    def force_retry(self, stream_id: int) -> bool:
+        """Force a stream to retry connection immediately, resetting circuit breaker.
+
+        Args:
+            stream_id: Database ID of the stream
+
+        Returns:
+            True if reset successfully, False if stream not running
+        """
+        with self._workers_lock:
+            worker = self._workers.get(stream_id)
+            if not worker:
+                return False
+
+            # Reset circuit breaker to half-open (will attempt reconnection)
+            worker._status.circuit_breaker_state = CircuitBreakerState.HALF_OPEN
+            worker._status.consecutive_failures = 0
+            worker._status.retry_count = 0
+            worker._status.next_retry_time = None
+            worker._status.error = "Retry requested - reconnecting..."
+            worker._emit_status_event()
+
+            logger.info(f"Stream {stream_id}: Force retry requested, circuit breaker reset")
+            return True
+
+    def _start_health_monitor(self) -> None:
+        """Start the health monitoring thread."""
+        if self._health_thread and self._health_thread.is_alive():
+            return
+
+        self._health_thread = threading.Thread(
+            target=self._health_monitor_loop,
+            name="stream-health-monitor",
+            daemon=True
+        )
+        self._health_thread.start()
+        logger.info("Health monitor started")
+
+    def _health_monitor_loop(self) -> None:
+        """Monitor thread health and resurrect dead threads."""
+        import time
+        from datetime import datetime
+
+        while not self._shutting_down:
+            try:
+                self._check_thread_health()
+            except Exception as e:
+                logger.error(f"Health monitor error: {e}")
+
+            time.sleep(self._health_check_interval)
+
+    def _check_thread_health(self) -> None:
+        """Check all workers and resurrect dead threads."""
+        from datetime import datetime
+
+        with self._workers_lock:
+            for stream_id, worker in list(self._workers.items()):
+                status = worker.status
+
+                # Skip if not supposed to be running
+                if not status.is_running:
+                    continue
+
+                # Check if video thread died unexpectedly
+                if not status.video_thread_alive:
+                    logger.warning(f"Stream {stream_id}: Video thread dead, resurrecting")
+                    self._resurrect_video_thread(worker)
+
+                # Check if audio thread died unexpectedly (when whisper is enabled)
+                if (worker.config.whisper_enabled and
+                    not status.audio_thread_alive):
+                    logger.warning(f"Stream {stream_id}: Audio thread dead, resurrecting")
+                    self._resurrect_audio_thread(worker)
+
+                # Check for stale streams (no frames for too long)
+                if status.video_connected and status.last_frame_time:
+                    time_since_frame = (datetime.now() - status.last_frame_time).total_seconds()
+                    if time_since_frame > FRAME_TIMEOUT_THRESHOLD:
+                        logger.warning(f"Stream {stream_id}: No frames for {int(time_since_frame)}s, marking stale")
+                        worker._status.video_connected = False
+                        worker._status.error = f"Stream stale - no frames for {int(time_since_frame)}s"
+                        worker._status.connection_state = ConnectionState.RETRYING
+                        worker._emit_status_event()
+
+    def _resurrect_video_thread(self, worker: StreamWorker) -> None:
+        """Resurrect a dead video thread."""
+        try:
+            worker._video_thread = threading.Thread(
+                target=worker._video_loop,
+                name=f"video-{worker.config.id}",
+                daemon=True
+            )
+            worker._video_thread.start()
+            logger.info(f"Stream {worker.config.id}: Video thread resurrected")
+        except Exception as e:
+            logger.error(f"Stream {worker.config.id}: Failed to resurrect video thread: {e}")
+
+    def _resurrect_audio_thread(self, worker: StreamWorker) -> None:
+        """Resurrect a dead audio thread."""
+        try:
+            worker._audio_thread = threading.Thread(
+                target=worker._audio_loop,
+                name=f"audio-{worker.config.id}",
+                daemon=True
+            )
+            worker._audio_thread.start()
+            logger.info(f"Stream {worker.config.id}: Audio thread resurrected")
+        except Exception as e:
+            logger.error(f"Stream {worker.config.id}: Failed to resurrect audio thread: {e}")
 
     def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals gracefully."""

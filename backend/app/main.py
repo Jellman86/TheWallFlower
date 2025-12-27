@@ -22,7 +22,8 @@ from app.models import (
     StreamConfigRead,
 )
 from app.stream_manager import stream_manager
-from app.worker import StreamStatus
+from app.worker import StreamStatus, ConnectionState, CircuitBreakerState
+from app.stream_validator import StreamValidator, StreamMetadata, StreamErrorType
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
 from app.models import Transcript, TranscriptRead
@@ -210,42 +211,109 @@ def restart_stream(stream_id: int, session: Session = Depends(get_session)):
 
 
 @app.post("/api/streams/test-connection")
-async def test_rtsp_connection(rtsp_url: str):
-    """Test if an RTSP URL is accessible.
+async def test_rtsp_connection(rtsp_url: str, timeout: int = 10):
+    """Test if an RTSP URL is accessible with detailed diagnostics.
 
-    Tries to connect and grab a single frame to verify the stream works.
+    Uses FFprobe for validation with proper timeout support.
+    Returns detailed error categorization and stream metadata.
     """
-    import cv2
-    import asyncio
+    # Validate with FFprobe (has proper timeout)
+    metadata = await StreamValidator.validate(rtsp_url, timeout=timeout)
 
-    def _test_connection():
-        try:
-            cap = cv2.VideoCapture(rtsp_url)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    if not metadata.is_valid:
+        return {
+            "success": False,
+            "error": metadata.error_message,
+            "error_type": metadata.error_type.value if metadata.error_type else "unknown",
+            "metadata": None
+        }
 
-            # Try to read a frame with timeout
-            if not cap.isOpened():
-                return {"success": False, "error": "Failed to open RTSP stream"}
+    # Return success with full metadata
+    return {
+        "success": True,
+        "message": "Connection successful",
+        "error": None,
+        "error_type": None,
+        "metadata": {
+            "resolution": f"{metadata.width}x{metadata.height}",
+            "codec": metadata.codec,
+            "fps": round(metadata.fps, 1) if metadata.fps else None,
+            "bitrate_kbps": metadata.bitrate // 1000 if metadata.bitrate else None,
+            "has_audio": metadata.has_audio,
+            "audio_codec": metadata.audio_codec
+        }
+    }
 
-            ret, frame = cap.read()
-            cap.release()
 
-            if not ret or frame is None:
-                return {"success": False, "error": "Failed to read frame from stream"}
+@app.get("/api/streams/{stream_id}/diagnostics")
+async def get_stream_diagnostics(stream_id: int, session: Session = Depends(get_session)):
+    """Get detailed diagnostics for a stream including metadata and connection history."""
+    stream = session.get(StreamConfig, stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Stream not found")
 
-            height, width = frame.shape[:2]
-            return {
-                "success": True,
-                "resolution": f"{width}x{height}",
-                "message": "Connection successful"
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    worker = stream_manager.get_worker(stream_id)
 
-    # Run in thread pool to not block
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, _test_connection)
-    return result
+    # Get fresh metadata via FFprobe
+    metadata = await StreamValidator.validate(stream.rtsp_url, timeout=10)
+
+    response = {
+        "stream_id": stream_id,
+        "name": stream.name,
+        "validation": {
+            "is_valid": metadata.is_valid,
+            "error_type": metadata.error_type.value if metadata.error_type else None,
+            "error_message": metadata.error_message
+        },
+        "metadata": None,
+        "worker_status": None
+    }
+
+    if metadata.is_valid:
+        response["metadata"] = {
+            "codec": metadata.codec,
+            "resolution": f"{metadata.width}x{metadata.height}",
+            "fps": round(metadata.fps, 1) if metadata.fps else None,
+            "bitrate_kbps": metadata.bitrate // 1000 if metadata.bitrate else None,
+            "has_audio": metadata.has_audio,
+            "audio_codec": metadata.audio_codec,
+            "audio_sample_rate": metadata.audio_sample_rate
+        }
+
+    if worker:
+        status = worker.status
+        response["worker_status"] = {
+            "is_running": status.is_running,
+            "video_connected": status.video_connected,
+            "video_thread_alive": status.video_thread_alive,
+            "audio_thread_alive": status.audio_thread_alive,
+            "fps": round(status.fps, 1),
+            "retry_count": status.retry_count,
+            "consecutive_failures": status.consecutive_failures,
+            "last_frame_time": status.last_frame_time.isoformat() if status.last_frame_time else None,
+            "last_successful_connection": status.last_successful_connection.isoformat() if status.last_successful_connection else None,
+            "ffmpeg_restarts": status.ffmpeg_restarts,
+            "whisper_reconnects": status.whisper_reconnects,
+            "connection_state": status.connection_state.value,
+            "circuit_breaker_state": status.circuit_breaker_state.value,
+            "error": status.error
+        }
+
+    return response
+
+
+@app.post("/api/streams/{stream_id}/force-retry")
+def force_retry_stream(stream_id: int, session: Session = Depends(get_session)):
+    """Force a stream to retry connection immediately, resetting circuit breaker."""
+    stream = session.get(StreamConfig, stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    success = stream_manager.force_retry(stream_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Stream not running")
+
+    return {"status": "retry_triggered", "stream_id": stream_id}
 
 
 # =============================================================================
@@ -269,6 +337,12 @@ def get_stream_status(stream_id: int, session: Session = Depends(get_session)) -
             "whisper_connected": status.whisper_connected,
             "fps": round(status.fps, 1),
             "error": status.error,
+            # Enhanced connection tracking
+            "connection_state": status.connection_state.value,
+            "retry_count": status.retry_count,
+            "next_retry_time": status.next_retry_time.isoformat() if status.next_retry_time else None,
+            "circuit_breaker_state": status.circuit_breaker_state.value,
+            "consecutive_failures": status.consecutive_failures,
         }
     else:
         return {
@@ -279,6 +353,12 @@ def get_stream_status(stream_id: int, session: Session = Depends(get_session)) -
             "whisper_connected": False,
             "fps": 0,
             "error": None,
+            # Enhanced connection tracking
+            "connection_state": ConnectionState.STOPPED.value,
+            "retry_count": 0,
+            "next_retry_time": None,
+            "circuit_breaker_state": CircuitBreakerState.CLOSED.value,
+            "consecutive_failures": 0,
         }
 
 
@@ -294,6 +374,9 @@ def get_all_status() -> Dict[str, Any]:
                 "whisper_connected": status.whisper_connected,
                 "fps": round(status.fps, 1),
                 "error": status.error,
+                "connection_state": status.connection_state.value,
+                "retry_count": status.retry_count,
+                "circuit_breaker_state": status.circuit_breaker_state.value,
             }
             for stream_id, status in statuses.items()
         },
