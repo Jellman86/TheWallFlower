@@ -2,8 +2,14 @@
 
 Manages the lifecycle of all stream workers, syncing with the database
 and providing access to active streams.
+
+Now integrates with go2rtc for efficient video streaming:
+- go2rtc handles RTSP → WebRTC/MJPEG conversion
+- Python workers handle audio extraction for Whisper transcription
+- Reduced CPU usage and improved browser compatibility
 """
 
+import asyncio
 import atexit
 import logging
 import signal
@@ -14,6 +20,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import engine
+from app.go2rtc_client import Go2RTCClient, Go2RTCError
 from app.models import StreamConfig
 from app.worker import (
     StreamWorker, StreamStatus, TranscriptSegment,
@@ -59,6 +66,14 @@ class StreamManager:
         self._whisper_host = settings.whisper_host
         self._whisper_port = settings.whisper_port
 
+        # go2rtc client for efficient video streaming
+        self._go2rtc = Go2RTCClient(
+            host=settings.go2rtc_host,
+            port=settings.go2rtc_port,
+            rtsp_port=settings.go2rtc_rtsp_port,
+            webrtc_port=settings.go2rtc_webrtc_port
+        )
+
         # Callback for transcript updates (for SSE/WebSocket broadcasting)
         self._transcript_callbacks: List[Callable[[int, TranscriptSegment], None]] = []
 
@@ -73,7 +88,8 @@ class StreamManager:
 
         self._initialized = True
         logger.info(
-            f"StreamManager initialized (Whisper: {self._whisper_host}:{self._whisper_port})"
+            f"StreamManager initialized (Whisper: {self._whisper_host}:{self._whisper_port}, "
+            f"go2rtc: {settings.go2rtc_host}:{settings.go2rtc_port})"
         )
 
     def register_transcript_callback(
@@ -97,8 +113,73 @@ class StreamManager:
             except Exception as e:
                 logger.error(f"Transcript callback error: {e}")
 
+    def _run_async(self, coro):
+        """Run an async coroutine from sync code."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Create a new task in the running loop
+                import concurrent.futures
+                future = concurrent.futures.Future()
+
+                async def wrapper():
+                    try:
+                        result = await coro
+                        future.set_result(result)
+                    except Exception as e:
+                        future.set_exception(e)
+
+                asyncio.ensure_future(wrapper())
+                return future.result(timeout=10)
+            else:
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            # No event loop, create one
+            return asyncio.run(coro)
+
+    async def _add_stream_to_go2rtc(self, stream_id: int, rtsp_url: str) -> bool:
+        """Add stream to go2rtc for efficient video streaming.
+
+        Args:
+            stream_id: Database stream ID
+            rtsp_url: RTSP URL of the camera
+
+        Returns:
+            True if added successfully, False otherwise
+        """
+        stream_name = self._go2rtc.get_stream_name(stream_id)
+        try:
+            await self._go2rtc.add_stream(stream_name, rtsp_url)
+            logger.info(f"Added stream {stream_id} to go2rtc as '{stream_name}'")
+            return True
+        except Go2RTCError as e:
+            logger.error(f"Failed to add stream {stream_id} to go2rtc: {e}")
+            return False
+
+    async def _remove_stream_from_go2rtc(self, stream_id: int) -> bool:
+        """Remove stream from go2rtc.
+
+        Args:
+            stream_id: Database stream ID
+
+        Returns:
+            True if removed successfully
+        """
+        stream_name = self._go2rtc.get_stream_name(stream_id)
+        try:
+            await self._go2rtc.remove_stream(stream_name)
+            logger.info(f"Removed stream {stream_id} from go2rtc")
+            return True
+        except Go2RTCError as e:
+            logger.warning(f"Failed to remove stream {stream_id} from go2rtc: {e}")
+            return False
+
     def start_stream(self, stream_id: int) -> bool:
         """Start a stream worker for the given stream ID.
+
+        This now:
+        1. Adds the stream to go2rtc for video streaming
+        2. Starts an audio worker for Whisper transcription (if enabled)
 
         Args:
             stream_id: Database ID of the stream to start
@@ -119,7 +200,14 @@ class StreamManager:
                     logger.error(f"Stream {stream_id} not found in database")
                     return False
 
-                # Create and start worker
+                # Add stream to go2rtc for video streaming
+                try:
+                    self._run_async(self._add_stream_to_go2rtc(stream_id, config.rtsp_url))
+                except Exception as e:
+                    logger.error(f"go2rtc error for stream {stream_id}: {e}")
+                    # Continue anyway - audio worker can still function
+
+                # Create and start worker (handles audio extraction for Whisper)
                 worker = StreamWorker(
                     config=config,
                     whisper_host=self._whisper_host,
@@ -134,10 +222,15 @@ class StreamManager:
                 return True
             except Exception as e:
                 logger.error(f"Failed to start stream {stream_id}: {e}")
+                # Clean up go2rtc if worker failed
+                try:
+                    self._run_async(self._remove_stream_from_go2rtc(stream_id))
+                except Exception:
+                    pass
                 return False
 
     def stop_stream(self, stream_id: int) -> bool:
-        """Stop a stream worker.
+        """Stop a stream worker and remove from go2rtc.
 
         Args:
             stream_id: Database ID of the stream to stop
@@ -149,6 +242,11 @@ class StreamManager:
             worker = self._workers.pop(stream_id, None)
             if worker:
                 worker.stop()
+                # Also remove from go2rtc
+                try:
+                    self._run_async(self._remove_stream_from_go2rtc(stream_id))
+                except Exception as e:
+                    logger.warning(f"Error removing stream {stream_id} from go2rtc: {e}")
                 logger.info(f"Stopped stream {stream_id}")
                 return True
             return False
@@ -182,6 +280,33 @@ class StreamManager:
                 stream_id: worker.status
                 for stream_id, worker in self._workers.items()
             }
+
+    @property
+    def go2rtc(self) -> Go2RTCClient:
+        """Get the go2rtc client for URL generation."""
+        return self._go2rtc
+
+    def get_stream_urls(self, stream_id: int, external_host: Optional[str] = None) -> Dict[str, str]:
+        """Get all available streaming URLs for a stream.
+
+        Args:
+            stream_id: Database stream ID
+            external_host: Optional external host for browser access
+
+        Returns:
+            Dictionary with webrtc, mjpeg, frame, hls, and rtsp URLs
+        """
+        stream_name = self._go2rtc.get_stream_name(stream_id)
+        ext_host = external_host or settings.go2rtc_external_host or None
+        return {
+            "webrtc": self._go2rtc.get_webrtc_url(stream_name, ext_host),
+            "webrtc_api": self._go2rtc.get_webrtc_api_url(stream_name, ext_host),
+            "mjpeg": self._go2rtc.get_mjpeg_url(stream_name, ext_host),
+            "frame": self._go2rtc.get_frame_url(stream_name, ext_host),
+            "hls": self._go2rtc.get_hls_url(stream_name, ext_host),
+            "rtsp": self._go2rtc.get_rtsp_url(stream_name),
+            "go2rtc_name": stream_name
+        }
 
     def reload_all(self) -> None:
         """Sync running workers with database state.

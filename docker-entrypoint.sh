@@ -25,10 +25,21 @@ log_error() {
 # Trap signals for graceful shutdown
 cleanup() {
     log_info "Received shutdown signal, stopping gracefully..."
+
+    # Stop the Python application first
     if [ -n "$APP_PID" ]; then
+        log_info "Stopping Python application (PID $APP_PID)..."
         kill -TERM "$APP_PID" 2>/dev/null || true
         wait "$APP_PID" 2>/dev/null || true
     fi
+
+    # Stop go2rtc
+    if [ -n "$GO2RTC_PID" ]; then
+        log_info "Stopping go2rtc (PID $GO2RTC_PID)..."
+        kill -TERM "$GO2RTC_PID" 2>/dev/null || true
+        wait "$GO2RTC_PID" 2>/dev/null || true
+    fi
+
     log_info "Shutdown complete"
     exit 0
 }
@@ -49,6 +60,13 @@ export WHISPER_HOST="${WHISPER_HOST:-whisper-live}"
 export WHISPER_PORT="${WHISPER_PORT:-9090}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 export WORKERS="${WORKERS:-1}"
+
+# go2rtc configuration
+export GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
+export GO2RTC_PORT="${GO2RTC_PORT:-1984}"
+export GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8554}"
+export GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-8555}"
+export GO2RTC_CONFIG_PATH="${GO2RTC_CONFIG_PATH:-/data/go2rtc.yaml}"
 
 # Ensure data directory exists
 DATA_DIR="${DATA_DIR:-/data}"
@@ -97,7 +115,67 @@ python -c "from app.db import init_db; init_db()" 2>/dev/null || {
     log_warn "Database initialization will happen on first request"
 }
 
+# =============================================================================
+# Start go2rtc for efficient video streaming
+# =============================================================================
+
+# Create default go2rtc config if it doesn't exist
+if [ ! -f "$GO2RTC_CONFIG_PATH" ]; then
+    log_info "Creating default go2rtc configuration..."
+    cat > "$GO2RTC_CONFIG_PATH" << 'EOYAML'
+# go2rtc configuration for TheWallflower
+# Streams are managed dynamically via API
+
+api:
+  listen: ":1984"
+  origin: "*"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    - stun:8555
+
+# Streams are added dynamically via API when cameras are started
+streams: {}
+
+log:
+  level: info
+EOYAML
+fi
+
+# Start go2rtc in background
+log_info "Starting go2rtc..."
+/usr/local/bin/go2rtc -config "$GO2RTC_CONFIG_PATH" &
+GO2RTC_PID=$!
+log_info "go2rtc started with PID $GO2RTC_PID"
+
+# Wait for go2rtc to be ready
+wait_for_go2rtc() {
+    local max_attempts=30
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s "http://localhost:${GO2RTC_PORT}/api/streams" > /dev/null 2>&1; then
+            return 0
+        fi
+        log_info "Waiting for go2rtc... (attempt $attempt/$max_attempts)"
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+if wait_for_go2rtc; then
+    log_info "go2rtc is ready on ports: API=$GO2RTC_PORT, RTSP=$GO2RTC_RTSP_PORT, WebRTC=$GO2RTC_WEBRTC_PORT"
+else
+    log_warn "go2rtc may not be fully ready, but continuing anyway"
+fi
+
+# =============================================================================
 # Start the application
+# =============================================================================
 log_info "Starting TheWallflower..."
 
 if [ "$1" = "dev" ]; then

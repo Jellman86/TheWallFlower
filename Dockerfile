@@ -19,6 +19,9 @@ RUN npm run build
 # =============================================================================
 FROM python:3.11-slim
 
+# Build argument for target architecture (amd64, arm64)
+ARG TARGETARCH
+
 # Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,6 +35,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# Download go2rtc binary for efficient video streaming
+# go2rtc handles RTSP->WebRTC/MJPEG conversion with minimal CPU usage
+RUN GO2RTC_VERSION="1.9.9" && \
+    ARCH="${TARGETARCH:-amd64}" && \
+    curl -fsSL "https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/go2rtc_linux_${ARCH}" \
+        -o /usr/local/bin/go2rtc && \
+    chmod +x /usr/local/bin/go2rtc && \
+    echo "go2rtc v${GO2RTC_VERSION} installed for ${ARCH}"
 
 WORKDIR /app
 
@@ -60,10 +72,18 @@ ENV DATABASE_URL="sqlite:///data/thewallflower.db" \
     WORKERS="1" \
     PYTHONUNBUFFERED="1" \
     PYTHONDONTWRITEBYTECODE="1" \
-    PYTHONPATH="/app/backend"
+    PYTHONPATH="/app/backend" \
+    GO2RTC_HOST="localhost" \
+    GO2RTC_PORT="1984" \
+    GO2RTC_RTSP_PORT="8554" \
+    GO2RTC_WEBRTC_PORT="8555"
 
-# Expose port
-EXPOSE 8000
+# Expose ports
+# 8000: Main API
+# 1984: go2rtc HTTP API & WebUI
+# 8554: go2rtc RTSP server
+# 8555: go2rtc WebRTC
+EXPOSE 8000 1984 8554 8555
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

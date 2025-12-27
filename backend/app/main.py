@@ -397,7 +397,70 @@ def get_all_status() -> Dict[str, Any]:
 
 
 # =============================================================================
-# Video Streaming Endpoints
+# go2rtc Streaming URLs
+# =============================================================================
+
+@app.get("/api/streams/{stream_id}/urls")
+def get_stream_urls(stream_id: int, session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Get go2rtc streaming URLs for a stream.
+
+    Returns URLs for different streaming protocols:
+    - webrtc: Low-latency WebRTC stream (recommended for live viewing)
+    - mjpeg: MJPEG stream for compatibility
+    - frame: Single frame snapshot
+    - hls: HLS stream for wider compatibility
+
+    Args:
+        stream_id: Stream ID to get URLs for
+
+    Returns:
+        Dictionary with URLs for each protocol
+    """
+    stream = session.get(StreamConfig, stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    # Get URLs from stream manager
+    urls = stream_manager.get_stream_urls(stream_id)
+
+    return {
+        "stream_id": stream_id,
+        "stream_name": stream.name,
+        "urls": urls,
+        "recommended": "webrtc"  # WebRTC has lowest latency
+    }
+
+
+@app.get("/api/go2rtc/status")
+async def get_go2rtc_status() -> Dict[str, Any]:
+    """Get go2rtc health status and configured streams.
+
+    Returns:
+        go2rtc status and list of configured streams
+    """
+    try:
+        is_healthy = await stream_manager.go2rtc.health_check()
+        streams = await stream_manager.go2rtc.get_streams() if is_healthy else {}
+        return {
+            "status": "healthy" if is_healthy else "unhealthy",
+            "host": settings.go2rtc_host,
+            "port": settings.go2rtc_port,
+            "streams": streams,
+            "stream_count": len(streams)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "host": settings.go2rtc_host,
+            "port": settings.go2rtc_port,
+            "streams": {},
+            "stream_count": 0
+        }
+
+
+# =============================================================================
+# Video Streaming Endpoints (Legacy - go2rtc preferred)
 # =============================================================================
 
 @app.get("/api/video/{stream_id}")

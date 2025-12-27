@@ -172,11 +172,11 @@ export const transcripts = {
 };
 
 /**
- * Video URLs (not fetch, direct URL for img/video src)
+ * Video URLs (legacy - uses Python MJPEG streaming)
  */
 export const video = {
   /**
-   * Get MJPEG stream URL for a stream.
+   * Get MJPEG stream URL for a stream (legacy).
    */
   streamUrl(id) {
     return `${BASE_URL}/video/${id}`;
@@ -187,6 +187,102 @@ export const video = {
    */
   snapshotUrl(id) {
     return `${BASE_URL}/snapshot/${id}`;
+  }
+};
+
+/**
+ * go2rtc streaming URLs - preferred for efficient video streaming
+ *
+ * go2rtc provides:
+ * - WebRTC: Low-latency (<100ms) streaming
+ * - MJPEG: Compatible streaming for simple viewers
+ * - HLS: Wide compatibility streaming
+ * - Frame: Single JPEG snapshot
+ */
+export const go2rtc = {
+  /**
+   * Get go2rtc port - default or from environment
+   */
+  _port: null,
+
+  get port() {
+    if (this._port === null) {
+      // Try to detect port from current URL or use default
+      // In production, go2rtc is on port 1984 on the same host
+      this._port = 1984;
+    }
+    return this._port;
+  },
+
+  /**
+   * Get go2rtc base URL.
+   * Uses the same host as the current page with go2rtc port.
+   */
+  get baseUrl() {
+    const host = window.location.hostname;
+    return `http://${host}:${this.port}`;
+  },
+
+  /**
+   * Generate stream name from stream ID.
+   */
+  streamName(id) {
+    return `camera_${id}`;
+  },
+
+  /**
+   * Get WebRTC stream URL (embedded viewer).
+   * Best for low-latency viewing.
+   */
+  webrtcUrl(id) {
+    return `${this.baseUrl}/stream.html?src=${this.streamName(id)}`;
+  },
+
+  /**
+   * Get WebRTC API URL (for custom integration).
+   */
+  webrtcApiUrl(id) {
+    return `${this.baseUrl}/api/webrtc?src=${this.streamName(id)}`;
+  },
+
+  /**
+   * Get MJPEG stream URL from go2rtc.
+   * More efficient than Python MJPEG streaming.
+   */
+  mjpegUrl(id) {
+    return `${this.baseUrl}/api/stream.mjpeg?src=${this.streamName(id)}`;
+  },
+
+  /**
+   * Get single frame (snapshot) URL.
+   */
+  frameUrl(id) {
+    return `${this.baseUrl}/api/frame.jpeg?src=${this.streamName(id)}`;
+  },
+
+  /**
+   * Get HLS streaming URL.
+   * Good for wide compatibility.
+   */
+  hlsUrl(id) {
+    return `${this.baseUrl}/api/stream.m3u8?src=${this.streamName(id)}`;
+  },
+
+  /**
+   * Fetch stream URLs from backend API.
+   * Returns all available URLs for a stream.
+   */
+  async getUrls(id) {
+    const response = await fetch(`${BASE_URL}/streams/${id}/urls`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Get go2rtc status and configured streams.
+   */
+  async getStatus() {
+    const response = await fetch(`${BASE_URL}/go2rtc/status`);
+    return handleResponse(response);
   }
 };
 

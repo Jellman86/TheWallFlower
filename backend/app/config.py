@@ -19,6 +19,13 @@ class Settings:
     whisper_host: str = "whisper-live"
     whisper_port: int = 9090
 
+    # go2rtc configuration
+    go2rtc_host: str = "localhost"
+    go2rtc_port: int = 1984
+    go2rtc_rtsp_port: int = 8554
+    go2rtc_webrtc_port: int = 8555
+    go2rtc_external_host: str = ""  # External host for browser access
+
     # Application
     log_level: str = "INFO"
     debug: bool = False
@@ -53,6 +60,19 @@ def get_settings() -> Settings:
         # WhisperLive
         whisper_host=os.getenv("WHISPER_HOST", Settings.whisper_host),
         whisper_port=int(os.getenv("WHISPER_PORT", str(Settings.whisper_port))),
+
+        # go2rtc
+        go2rtc_host=os.getenv("GO2RTC_HOST", Settings.go2rtc_host),
+        go2rtc_port=int(os.getenv("GO2RTC_PORT", str(Settings.go2rtc_port))),
+        go2rtc_rtsp_port=int(os.getenv(
+            "GO2RTC_RTSP_PORT", str(Settings.go2rtc_rtsp_port)
+        )),
+        go2rtc_webrtc_port=int(os.getenv(
+            "GO2RTC_WEBRTC_PORT", str(Settings.go2rtc_webrtc_port)
+        )),
+        go2rtc_external_host=os.getenv(
+            "GO2RTC_EXTERNAL_HOST", Settings.go2rtc_external_host
+        ),
 
         # Application
         log_level=os.getenv("LOG_LEVEL", Settings.log_level),

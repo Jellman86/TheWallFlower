@@ -6,7 +6,10 @@ services:
       dockerfile: Dockerfile
     container_name: thewallflower
     ports:
-      - "${PORT:-8080}:8000"
+      - "${PORT:-8080}:8000"           # Main API
+      - "${GO2RTC_PORT:-1984}:1984"    # go2rtc HTTP API & WebUI
+      - "${GO2RTC_RTSP_PORT:-8554}:8554"   # go2rtc RTSP server
+      - "${GO2RTC_WEBRTC_PORT:-8555}:8555" # go2rtc WebRTC
     volumes:
       - ${CONFIG_PATH}/thewallflower/data:/data
     environment:
@@ -16,6 +19,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
+      # go2rtc configuration
+      - GO2RTC_HOST=${GO2RTC_HOST:-localhost}
+      - GO2RTC_PORT=1984
+      - GO2RTC_RTSP_PORT=8554
+      - GO2RTC_WEBRTC_PORT=8555
     depends_on:
       - whisper-live
     restart: unless-stopped
