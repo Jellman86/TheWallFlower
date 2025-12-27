@@ -59,7 +59,8 @@ ENV DATABASE_URL="sqlite:///data/thewallflower.db" \
     LOG_LEVEL="INFO" \
     WORKERS="1" \
     PYTHONUNBUFFERED="1" \
-    PYTHONDONTWRITEBYTECODE="1"
+    PYTHONDONTWRITEBYTECODE="1" \
+    PYTHONPATH="/app/backend"
 
 # Expose port
 EXPOSE 8000

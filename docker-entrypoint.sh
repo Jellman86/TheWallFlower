@@ -93,7 +93,7 @@ fi
 
 # Run database migrations if needed
 log_info "Initializing database..."
-python -c "from backend.app.db import init_db; init_db()" 2>/dev/null || {
+python -c "from app.db import init_db; init_db()" 2>/dev/null || {
     log_warn "Database initialization will happen on first request"
 }
 
@@ -103,14 +103,14 @@ log_info "Starting TheWallflower..."
 if [ "$1" = "dev" ]; then
     # Development mode with auto-reload
     log_info "Running in development mode"
-    uvicorn backend.app.main:app \
+    uvicorn app.main:app \
         --host 0.0.0.0 \
         --port 8000 \
         --reload \
         --log-level "${LOG_LEVEL,,}" &
 else
     # Production mode
-    uvicorn backend.app.main:app \
+    uvicorn app.main:app \
         --host 0.0.0.0 \
         --port 8000 \
         --workers "$WORKERS" \
