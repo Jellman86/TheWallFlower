@@ -41,6 +41,12 @@ class StreamMetadata:
     audio_codec: Optional[str] = None
     audio_sample_rate: Optional[int] = None
 
+    # Debug info
+    debug_stderr: Optional[str] = None
+    debug_stdout: Optional[str] = None
+    debug_transport: Optional[str] = None
+    debug_command: Optional[str] = None
+
 
 class StreamValidator:
     """Validates RTSP streams using FFprobe."""
@@ -101,16 +107,17 @@ class StreamValidator:
     ) -> StreamMetadata:
         """Try FFprobe with specific transport."""
 
-        # Convert timeout to microseconds for RTSP-specific options
+        # Convert timeout to microseconds for FFmpeg options
         timeout_us = str(timeout * 1000000)
 
         # Build FFprobe command with proper options
         # RTSP-specific options must come BEFORE the input URL
+        # Use -rw_timeout (read/write timeout) which is more widely supported than -stimeout
         ffprobe_cmd = [
             "ffprobe",
             "-v", "error",  # Only show errors (less noise)
             "-rtsp_transport", transport,
-            "-stimeout", timeout_us,  # RTSP socket timeout (microseconds)
+            "-rw_timeout", timeout_us,  # Read/write timeout (microseconds)
             "-analyzeduration", "5000000",  # 5 seconds analyze
             "-probesize", "5000000",  # 5MB probe
             "-print_format", "json",
@@ -118,8 +125,9 @@ class StreamValidator:
             rtsp_url
         ]
 
-        # Log command (hide credentials in URL)
+        # Build safe command string for debug output (hide credentials)
         safe_url = rtsp_url.split('@')[-1] if '@' in rtsp_url else rtsp_url
+        safe_cmd = ' '.join(ffprobe_cmd[:-1]) + f' "rtsp://***@{safe_url}"'
         logger.info(f"FFprobe validating ({transport}): rtsp://***@{safe_url}")
 
         try:
@@ -135,37 +143,57 @@ class StreamValidator:
                 logger.info(f"FFprobe stderr ({transport}): {result.stderr[:500]}")
 
             if result.returncode != 0:
-                return cls._parse_error(result.stderr, rtsp_url)
+                metadata = cls._parse_error(result.stderr, rtsp_url)
+                # Add debug info
+                metadata.debug_stderr = result.stderr[:2000] if result.stderr else None
+                metadata.debug_stdout = result.stdout[:2000] if result.stdout else None
+                metadata.debug_transport = transport
+                metadata.debug_command = safe_cmd
+                return metadata
 
             # Check if we got valid JSON output
             if not result.stdout.strip():
                 return StreamMetadata(
                     is_valid=False,
                     error_type=StreamErrorType.UNKNOWN,
-                    error_message="No response from stream"
+                    error_message="No response from stream",
+                    debug_stderr=result.stderr[:2000] if result.stderr else None,
+                    debug_stdout=result.stdout[:2000] if result.stdout else None,
+                    debug_transport=transport,
+                    debug_command=safe_cmd
                 )
 
-            return cls._parse_metadata(result.stdout)
+            metadata = cls._parse_metadata(result.stdout)
+            # Add debug info even on success
+            metadata.debug_transport = transport
+            metadata.debug_command = safe_cmd
+            return metadata
 
         except subprocess.TimeoutExpired:
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.TIMEOUT,
-                error_message=f"Connection timed out after {timeout} seconds"
+                error_message=f"Connection timed out after {timeout} seconds",
+                debug_transport=transport,
+                debug_command=safe_cmd
             )
         except FileNotFoundError:
             logger.error("FFprobe not found in PATH")
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNKNOWN,
-                error_message="FFprobe not installed"
+                error_message="FFprobe not installed",
+                debug_transport=transport,
+                debug_command=safe_cmd
             )
         except Exception as e:
             logger.error(f"FFprobe validation error: {e}")
             return StreamMetadata(
                 is_valid=False,
                 error_type=StreamErrorType.UNKNOWN,
-                error_message=str(e)
+                error_message=str(e),
+                debug_transport=transport,
+                debug_command=safe_cmd
             )
 
     @classmethod

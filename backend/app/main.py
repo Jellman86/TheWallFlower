@@ -221,12 +221,21 @@ async def test_rtsp_connection(rtsp_url: str, timeout: int = 10):
     # Validate with FFprobe (has proper timeout)
     metadata = await StreamValidator.validate(rtsp_url, timeout=timeout)
 
+    # Build debug info
+    debug_info = {
+        "command": metadata.debug_command,
+        "transport": metadata.debug_transport,
+        "stderr": metadata.debug_stderr,
+        "stdout": metadata.debug_stdout[:500] if metadata.debug_stdout else None,
+    }
+
     if not metadata.is_valid:
         return {
             "success": False,
             "error": metadata.error_message,
             "error_type": metadata.error_type.value if metadata.error_type else "unknown",
-            "metadata": None
+            "metadata": None,
+            "debug": debug_info
         }
 
     # Return success with full metadata
@@ -242,7 +251,8 @@ async def test_rtsp_connection(rtsp_url: str, timeout: int = 10):
             "bitrate_kbps": metadata.bitrate // 1000 if metadata.bitrate else None,
             "has_audio": metadata.has_audio,
             "audio_codec": metadata.audio_codec
-        }
+        },
+        "debug": debug_info
     }
 
 
