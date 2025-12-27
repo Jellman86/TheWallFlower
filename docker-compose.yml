@@ -17,14 +17,7 @@ services:
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
     depends_on:
-      whisper-live:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      - whisper-live
     restart: unless-stopped
     networks:
       - default
@@ -40,12 +33,6 @@ services:
       - "${WHISPER_PORT:-9090}:9090"
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9090"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
     restart: unless-stopped
     networks:
       - default
