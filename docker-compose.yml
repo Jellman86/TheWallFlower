@@ -8,7 +8,7 @@ services:
     ports:
       - "${PORT:-8080}:8000"
     volumes:
-      - thewallflower-data:/data
+      - ${CONFIG_PATH}/thewallflower/data:/data
     environment:
       - DATABASE_URL=sqlite:///data/thewallflower.db
       - WHISPER_HOST=whisper-live
@@ -56,10 +56,6 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
-
-volumes:
-  thewallflower-data:
-    driver: local
 
 networks:
   default:
