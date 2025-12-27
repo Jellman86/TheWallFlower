@@ -142,6 +142,33 @@ class StreamWorker:
         with self._transcript_lock:
             return list(self._transcript_segments)
 
+    def _write_transcript_to_file(self, segment: TranscriptSegment) -> None:
+        """Write a transcript segment to file."""
+        import os
+        from datetime import datetime
+
+        try:
+            # Determine file path
+            if getattr(self.config, 'transcript_file_path', None):
+                file_path = self.config.transcript_file_path
+            else:
+                # Default path: /data/transcripts/[stream-name].txt
+                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in self.config.name)
+                file_path = f"/data/transcripts/{safe_name}.txt"
+
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # Format timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Append to file
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {segment.text}\n")
+
+        except Exception as e:
+            logger.error(f"Failed to write transcript to file: {e}")
+
     def start(self) -> None:
         """Start the stream worker."""
         if self._status.is_running:
@@ -492,6 +519,10 @@ class StreamWorker:
                             end_time=segment.end_time,
                             is_final=True,
                         ))
+
+                        # Write to file if configured
+                        if getattr(self.config, 'save_transcripts_to_file', False):
+                            self._write_transcript_to_file(segment)
 
                     # Callback for real-time updates
                     if self.on_transcript:

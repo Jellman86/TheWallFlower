@@ -1,5 +1,5 @@
 <script>
-  import { streams } from '../services/api.js';
+  import { streams, control } from '../services/api.js';
   import Icon from './Icons.svelte';
 
   let {
@@ -13,8 +13,12 @@
   let rtspUrl = $state('');
   let whisperEnabled = $state(false);
   let faceDetectionEnabled = $state(false);
+  let saveTranscriptsToFile = $state(false);
+  let transcriptFilePath = $state('');
   let isLoading = $state(false);
+  let isTesting = $state(false);
   let error = $state('');
+  let testResult = $state(null);
 
   let isEditing = $derived(stream !== null);
   let title = $derived(isEditing ? 'Edit Stream' : 'Add Stream');
@@ -26,14 +30,43 @@
       rtspUrl = stream.rtsp_url || '';
       whisperEnabled = stream.whisper_enabled || false;
       faceDetectionEnabled = stream.face_detection_enabled || false;
+      saveTranscriptsToFile = stream.save_transcripts_to_file || false;
+      transcriptFilePath = stream.transcript_file_path || '';
     } else {
       name = '';
       rtspUrl = '';
       whisperEnabled = false;
       faceDetectionEnabled = false;
+      saveTranscriptsToFile = false;
+      transcriptFilePath = '';
     }
     error = '';
+    testResult = null;
   });
+
+  async function handleTestConnection() {
+    if (!rtspUrl.trim()) {
+      error = 'Enter an RTSP URL to test';
+      return;
+    }
+
+    isTesting = true;
+    error = '';
+    testResult = null;
+
+    try {
+      const result = await control.testConnection(rtspUrl.trim());
+      testResult = result;
+      if (!result.success) {
+        error = result.error || 'Connection failed';
+      }
+    } catch (e) {
+      error = e.message || 'Failed to test connection';
+      testResult = { success: false, error: error };
+    }
+
+    isTesting = false;
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -48,6 +81,12 @@
       return;
     }
 
+    // Basic RTSP URL validation
+    if (!rtspUrl.trim().toLowerCase().startsWith('rtsp://')) {
+      error = 'RTSP URL must start with rtsp://';
+      return;
+    }
+
     isLoading = true;
 
     try {
@@ -55,7 +94,9 @@
         name: name.trim(),
         rtsp_url: rtspUrl.trim(),
         whisper_enabled: whisperEnabled,
-        face_detection_enabled: faceDetectionEnabled
+        face_detection_enabled: faceDetectionEnabled,
+        save_transcripts_to_file: saveTranscriptsToFile,
+        transcript_file_path: transcriptFilePath.trim() || null
       };
 
       if (isEditing) {
@@ -143,16 +184,40 @@
 
         <div>
           <label for="rtsp" class="block text-sm font-medium mb-1">RTSP URL</label>
-          <input
-            type="text"
-            id="rtsp"
-            bind:value={rtspUrl}
-            placeholder="rtsp://user:pass@192.168.1.100:554/stream"
-            class="w-full px-3 py-2 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded focus:border-[var(--color-primary)] focus:outline-none font-mono text-sm"
-          />
+          <div class="flex gap-2">
+            <input
+              type="text"
+              id="rtsp"
+              bind:value={rtspUrl}
+              placeholder="rtsp://user:pass@192.168.1.100:554/stream"
+              class="flex-1 px-3 py-2 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded focus:border-[var(--color-primary)] focus:outline-none font-mono text-sm"
+            />
+            <button
+              type="button"
+              onclick={handleTestConnection}
+              disabled={isTesting || !rtspUrl.trim()}
+              class="px-3 py-2 text-sm bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded transition-colors disabled:opacity-50"
+              title="Test connection"
+            >
+              {#if isTesting}
+                <Icon name="refresh" size={16} class="animate-spin" />
+              {:else}
+                Test
+              {/if}
+            </button>
+          </div>
           <p class="mt-1 text-xs text-[var(--color-text-muted)]">
             Include credentials if required: rtsp://user:pass@host:port/path
           </p>
+          {#if testResult}
+            <div class="mt-2 p-2 rounded text-xs {testResult.success ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-danger)]/20 text-[var(--color-danger)]'}">
+              {#if testResult.success}
+                ✓ Connection successful ({testResult.resolution})
+              {:else}
+                ✗ {testResult.error}
+              {/if}
+            </div>
+          {/if}
         </div>
 
         <div class="space-y-3">
@@ -169,6 +234,40 @@
               </p>
             </div>
           </label>
+
+          {#if whisperEnabled}
+            <div class="ml-7 space-y-3">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  bind:checked={saveTranscriptsToFile}
+                  class="w-4 h-4 accent-[var(--color-primary)]"
+                />
+                <div>
+                  <span class="text-sm font-medium">Save transcripts to file</span>
+                  <p class="text-xs text-[var(--color-text-muted)]">
+                    Write transcripts to the filesystem
+                  </p>
+                </div>
+              </label>
+
+              {#if saveTranscriptsToFile}
+                <div>
+                  <label for="transcript-path" class="block text-sm font-medium mb-1">File path (optional)</label>
+                  <input
+                    type="text"
+                    id="transcript-path"
+                    bind:value={transcriptFilePath}
+                    placeholder="/data/transcripts/{name}.txt"
+                    class="w-full px-3 py-2 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded focus:border-[var(--color-primary)] focus:outline-none font-mono text-xs"
+                  />
+                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                    Leave empty for default: /data/transcripts/[stream-name].txt
+                  </p>
+                </div>
+              {/if}
+            </div>
+          {/if}
 
           <label class="flex items-center gap-3 cursor-pointer opacity-50">
             <input

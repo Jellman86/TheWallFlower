@@ -209,6 +209,45 @@ def restart_stream(stream_id: int, session: Session = Depends(get_session)):
     return {"status": "restarted", "stream_id": stream_id}
 
 
+@app.post("/api/streams/test-connection")
+async def test_rtsp_connection(rtsp_url: str):
+    """Test if an RTSP URL is accessible.
+
+    Tries to connect and grab a single frame to verify the stream works.
+    """
+    import cv2
+    import asyncio
+
+    def _test_connection():
+        try:
+            cap = cv2.VideoCapture(rtsp_url)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Try to read a frame with timeout
+            if not cap.isOpened():
+                return {"success": False, "error": "Failed to open RTSP stream"}
+
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret or frame is None:
+                return {"success": False, "error": "Failed to read frame from stream"}
+
+            height, width = frame.shape[:2]
+            return {
+                "success": True,
+                "resolution": f"{width}x{height}",
+                "message": "Connection successful"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # Run in thread pool to not block
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _test_connection)
+    return result
+
+
 # =============================================================================
 # Stream Status Endpoints
 # =============================================================================

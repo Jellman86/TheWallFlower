@@ -89,6 +89,16 @@ export const control = {
   },
 
   /**
+   * Test RTSP connection without creating a stream.
+   */
+  async testConnection(rtspUrl) {
+    const response = await fetch(`${BASE_URL}/streams/test-connection?rtsp_url=${encodeURIComponent(rtspUrl)}`, {
+      method: 'POST'
+    });
+    return handleResponse(response);
+  },
+
+  /**
    * Stop a stream.
    */
   async stop(id) {

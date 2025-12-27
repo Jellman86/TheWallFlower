@@ -1,7 +1,9 @@
 """Database models for TheWallflower."""
 
+import re
 from datetime import datetime
 from typing import Optional
+from pydantic import field_validator
 from sqlmodel import Field, SQLModel
 
 
@@ -11,6 +13,39 @@ class StreamConfigBase(SQLModel):
     rtsp_url: str
     whisper_enabled: bool = Field(default=True)
     face_detection_enabled: bool = Field(default=False)  # Future use
+    save_transcripts_to_file: bool = Field(default=False)  # Save transcripts to filesystem
+    transcript_file_path: Optional[str] = Field(default=None)  # Custom path for transcripts
+
+    @field_validator('rtsp_url')
+    @classmethod
+    def validate_rtsp_url(cls, v: str) -> str:
+        """Validate RTSP URL format."""
+        v = v.strip()
+        if not v:
+            raise ValueError('RTSP URL is required')
+
+        # Check for valid RTSP URL pattern
+        rtsp_pattern = r'^rtsp://([^:]+:[^@]+@)?[\w\.\-]+:\d+/.+$|^rtsp://([^:]+:[^@]+@)?[\w\.\-]+/.+$'
+        if not re.match(rtsp_pattern, v, re.IGNORECASE):
+            # Also allow without explicit port
+            simple_pattern = r'^rtsp://.*$'
+            if not re.match(simple_pattern, v, re.IGNORECASE):
+                raise ValueError(
+                    'Invalid RTSP URL format. Expected: rtsp://[user:pass@]host[:port]/path'
+                )
+
+        return v
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate stream name."""
+        v = v.strip()
+        if not v:
+            raise ValueError('Stream name is required')
+        if len(v) > 100:
+            raise ValueError('Stream name must be less than 100 characters')
+        return v
 
 
 class StreamConfig(StreamConfigBase, table=True):
