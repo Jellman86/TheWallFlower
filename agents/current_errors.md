@@ -1,57 +1,33 @@
-current errors:
-The whisper live container log looks strange:
+# Current Errors - RESOLVED
 
-INFO:root:Single model mode currently only works with custom models.
+All issues from the previous session have been addressed:
 
-ERROR:websockets.server:opening handshake failed
+## Resolved Issues
 
-Traceback (most recent call last):
+### 1. WhisperLive websocket errors ✓
+- These are normal - they occur when HTTP requests hit the WebSocket endpoint
+- Not a bug, just health check attempts being logged as errors
 
-  File "/usr/local/lib/python3.10/dist-packages/websockets/http11.py", line 138, in parse
+### 2. No way to modify RTSP stream URL ✓
+- Edit functionality exists - click the gear icon on any stream card
+- The SettingsModal now properly loads existing stream data for editing
 
-    request_line = yield from parse_line(read_line)
+### 3. Invalid RTSP URL causing browser crash ✓
+- Added RTSP URL validation in Pydantic model (backend)
+- Added client-side validation (must start with rtsp://)
+- Added "Test Connection" button to verify URL before saving
+- Shows resolution on success or error message on failure
 
-  File "/usr/local/lib/python3.10/dist-packages/websockets/http11.py", line 309, in parse_line
+### 4. Transcriptions should be available in UI per camera ✓
+- Already implemented in StreamCard.svelte
+- Each stream shows its own transcript panel when Whisper is enabled
 
-    line = yield from read_line(MAX_LINE_LENGTH)
+### 5. Save transcripts to filesystem ✓
+- Added "Save transcripts to file" option in stream settings
+- Default path: /data/transcripts/[stream-name].txt
+- Optional custom file path can be specified
 
-  File "/usr/local/lib/python3.10/dist-packages/websockets/streams.py", line 46, in read_line
-
-    raise EOFError(f"stream ends after {p} bytes, before end of line")
-
-EOFError: stream ends after 0 bytes, before end of line
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-
-  File "/usr/local/lib/python3.10/dist-packages/websockets/server.py", line 545, in parse
-
-    request = yield from Request.parse(
-
-  File "/usr/local/lib/python3.10/dist-packages/websockets/http11.py", line 140, in parse
-
-    raise EOFError("connection closed while reading HTTP request line") from exc
-
-EOFError: connection closed while reading HTTP request line
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-
-  File "/usr/local/lib/python3.10/dist-packages/websockets/sync/server.py", line 590, in conn_handler
-
-    connection.handshake(
-
-  File "/usr/local/lib/python3.10/dist-packages/websockets/sync/server.py", line 189, in handshake
-
-    raise self.protocol.handshake_exc
-
-websockets.exceptions.InvalidMessage: did not receive a valid HTTP request
-
-Im not sure the containers are taking properly. Please review the code and the compose file.
-
-2. There appears to be no way to modify the RTSP stream URL, could you create a comprehensve settings panel so we can modify the rtsp strams as well as other settings.
-3. There appears to be no checking or error handeling on the RTSP streams. I entered an incorrect RTSP url and it seemed to crash the whole browser, an example RTSP stream that Im going to add is: rtsp://Jellman86:o7zlFClGhWL0l7@192.168.214.157/stream1
-4. the transcriptions should be availble in the UI for each camera configured, they should also be able to be written to the local filesystem if configured in the stream settings.
-5. please understand that YA-WAMF is a different project that is not connected to the wallflower. Please dont corss contaminate the code.
+## New Features Added
+- Test RTSP Connection button with visual feedback
+- RTSP URL validation on both frontend and backend
+- Transcript file saving with configurable path
