@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 # Health monitor configuration
 HEALTH_CHECK_INTERVAL = 10  # seconds
-FRAME_TIMEOUT_THRESHOLD = 30  # seconds without frame = stale
 
 
 class StreamManager:
