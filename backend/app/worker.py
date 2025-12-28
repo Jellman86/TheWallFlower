@@ -117,6 +117,10 @@ class StreamWorker:
         self._audio_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._ffmpeg_process: Optional[subprocess.Popen] = None
+        
+        # FIX: Add lock for thread-safe status updates
+        # Prevents race conditions when reading/writing status from multiple threads
+        self._status_lock = threading.Lock()
 
         # Status
         self._status = StreamStatus(stream_id=config.id)
@@ -127,10 +131,42 @@ class StreamWorker:
 
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0
+    
+    def _cleanup_ffmpeg(self, process: subprocess.Popen, timeout: int = 5):
+        """Clean up FFmpeg process robustly.
+        
+        FIX: Ensures processes don't become zombies.
+        """
+        if process is None:
+            return
+        try:
+            # Close pipes first to unblock any reads
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+            
+            # Terminate gracefully
+            process.terminate()
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Force kill if it doesn't shut down
+                logger.warning(f"Force killing FFmpeg for stream {self.config.id}")
+                process.kill()
+                process.wait(timeout=2)
+        except Exception as e:
+            logger.error(f"FFmpeg cleanup error: {e}")
+
+    def _update_status(self, **kwargs):
+        """Thread-safe status update helper."""
+        with self._status_lock:
+            for key, value in kwargs.items():
+                setattr(self._status, key, value)
 
     def _emit_status_event(self) -> None:
         """Emit current status via SSE."""
-        status = self.status
+        status = self.status # Access via property to ensure lock usage
         event_broadcaster.emit_status(self.config.id, {
             "is_running": status.is_running,
             "video_connected": status.video_connected,
@@ -151,13 +187,17 @@ class StreamWorker:
     @property
     def status(self) -> StreamStatus:
         """Get current stream status with thread health."""
-        # Video is handled by go2rtc - always "connected" when running
-        self._status.video_thread_alive = self._status.is_running
-        # Audio thread health
-        self._status.audio_thread_alive = (
-            self._audio_thread is not None and self._audio_thread.is_alive()
-        )
-        return self._status
+        # FIX: Use lock to ensure atomic read of status
+        with self._status_lock:
+            import copy
+            # Video is handled by go2rtc - always "connected" when running
+            self._status.video_thread_alive = self._status.is_running
+            # Audio thread health
+            self._status.audio_thread_alive = (
+                self._audio_thread is not None and self._audio_thread.is_alive()
+            )
+            # Return a copy to prevent modification outside the lock
+            return copy.copy(self._status)
 
     @property
     def transcripts(self) -> List[TranscriptSegment]:
@@ -198,16 +238,21 @@ class StreamWorker:
         Video streaming is handled by go2rtc (added via stream_manager).
         This only starts the audio thread for Whisper transcription.
         """
-        if self._status.is_running:
-            logger.warning(f"Stream {self.config.id} already running")
-            return
+        # Access is_running safely via property or lock
+        # We need to check internal status directly here to avoid copy overhead
+        with self._status_lock:
+            if self._status.is_running:
+                logger.warning(f"Stream {self.config.id} already running")
+                return
+            
+            self._status.is_running = True
+            self._status.video_connected = True  # go2rtc handles video
+            self._status.connection_state = ConnectionState.CONNECTED
+            self._status.error = None
 
         logger.info(f"Starting stream worker for {self.config.name} ({self.config.id})")
         self._stop_event.clear()
-        self._status.is_running = True
-        self._status.video_connected = True  # go2rtc handles video
-        self._status.connection_state = ConnectionState.CONNECTED
-        self._status.error = None
+        
         self._emit_status_event()
 
         # Start audio thread if whisper is enabled
@@ -224,33 +269,32 @@ class StreamWorker:
 
     def stop(self) -> None:
         """Stop the stream worker."""
-        if not self._status.is_running:
-            return
+        # Check running state safely
+        with self._status_lock:
+             if not self._status.is_running:
+                return
+             self._status.is_running = False
 
         logger.info(f"Stopping stream worker for {self.config.name} ({self.config.id})")
         self._stop_event.set()
-        self._status.is_running = False
 
         # Stop FFmpeg process if running
+        # FIX: Use robust cleanup method
         if self._ffmpeg_process:
-            try:
-                self._ffmpeg_process.terminate()
-                self._ffmpeg_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._ffmpeg_process.kill()
-                self._ffmpeg_process.wait()
-            except Exception as e:
-                logger.error(f"Error stopping FFmpeg: {e}")
+            self._cleanup_ffmpeg(self._ffmpeg_process)
             self._ffmpeg_process = None
 
         # Wait for audio thread to finish
         if self._audio_thread and self._audio_thread.is_alive():
             self._audio_thread.join(timeout=5.0)
 
-        self._status.video_connected = False
-        self._status.audio_connected = False
-        self._status.whisper_connected = False
-        self._status.connection_state = ConnectionState.STOPPED
+        # Update status safely
+        self._update_status(
+            video_connected=False,
+            audio_connected=False,
+            whisper_connected=False,
+            connection_state=ConnectionState.STOPPED
+        )
         self._emit_status_event()
 
     def _audio_loop(self) -> None:
@@ -265,7 +309,7 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
             except Exception as e:
                 logger.error(f"Audio loop error for stream {self.config.id}: {e}")
-                self._status.whisper_connected = False
+                self._update_status(whisper_connected=False)
 
             if not self._stop_event.is_set():
                 # Exponential backoff for reconnection
@@ -275,7 +319,10 @@ class StreamWorker:
                 )
                 delay = WHISPER_RECONNECT_BACKOFF[backoff_index]
                 self._whisper_reconnect_attempts += 1
-                self._status.whisper_reconnects += 1
+                
+                # Safe increment
+                with self._status_lock:
+                    self._status.whisper_reconnects += 1
 
                 logger.info(
                     f"WhisperLive reconnecting in {delay}s "
@@ -284,6 +331,7 @@ class StreamWorker:
                 time.sleep(delay)
 
         logger.info(f"Audio thread stopped for stream {self.config.id}")
+
 
     def _read_ffmpeg_stderr(self, process: subprocess.Popen) -> None:
         """Read FFmpeg stderr to prevent buffer blocking and log errors."""
