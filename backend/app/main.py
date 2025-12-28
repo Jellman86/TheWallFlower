@@ -549,6 +549,98 @@ async def stream_frame_proxy(stream_id: int):
         raise HTTPException(status_code=504, detail="Timeout getting frame")
 
 
+@app.get("/api/streams/{stream_id}/hls")
+async def stream_hls_proxy(stream_id: int):
+    """Proxy HLS playlist from go2rtc.
+
+    Args:
+        stream_id: Stream ID to view
+    """
+    import httpx
+
+    worker = stream_manager.get_worker(stream_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    if not worker.status.is_running:
+        raise HTTPException(status_code=404, detail="Stream not running")
+
+    # Build go2rtc HLS URL (internal, localhost)
+    stream_name = f"camera_{stream_id}"
+    go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/stream.m3u8?src={stream_name}"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(go2rtc_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail="Failed to get HLS stream from go2rtc")
+
+            # Return the m3u8 playlist, but rewrite URLs to go through our proxy
+            content = response.text
+            # The playlist references segment URLs - these need to be relative
+            # go2rtc returns relative URLs so they should work as-is through the proxy
+
+            return Response(
+                content=content,
+                media_type="application/vnd.apple.mpegurl",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                }
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="go2rtc not available")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout getting HLS stream")
+
+
+@app.post("/api/streams/{stream_id}/webrtc")
+async def stream_webrtc_proxy(stream_id: int, request: Request):
+    """Proxy WebRTC signaling to go2rtc.
+
+    This proxies the WebRTC SDP exchange to go2rtc so WebRTC works
+    through reverse proxies and HTTPS.
+
+    Args:
+        stream_id: Stream ID to connect to
+    """
+    import httpx
+
+    worker = stream_manager.get_worker(stream_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    if not worker.status.is_running:
+        raise HTTPException(status_code=404, detail="Stream not running")
+
+    # Build go2rtc WebRTC API URL (internal, localhost)
+    stream_name = f"camera_{stream_id}"
+    go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/webrtc?src={stream_name}"
+
+    try:
+        # Get the SDP offer from the request body
+        body = await request.body()
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.post(
+                go2rtc_url,
+                content=body,
+                headers={"Content-Type": request.headers.get("content-type", "application/sdp")}
+            )
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail="WebRTC signaling failed")
+
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "application/sdp"),
+                status_code=response.status_code
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="go2rtc not available")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout during WebRTC signaling")
+
+
 # =============================================================================
 # Transcript Endpoints
 # =============================================================================

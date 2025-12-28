@@ -193,6 +193,11 @@ export const video = {
 /**
  * go2rtc streaming URLs - preferred for efficient video streaming
  *
+ * All go2rtc streams are proxied through the backend API for:
+ * - HTTPS/reverse proxy compatibility (no mixed content errors)
+ * - No direct port access required from browser
+ * - Works behind any reverse proxy configuration
+ *
  * go2rtc provides:
  * - WebRTC: Low-latency (<100ms) streaming
  * - MJPEG: Compatible streaming for simple viewers
@@ -201,30 +206,6 @@ export const video = {
  */
 export const go2rtc = {
   /**
-   * Get go2rtc port - default or from environment
-   */
-  _port: null,
-
-  get port() {
-    if (this._port === null) {
-      // Try to detect port from current URL or use default
-      // In production, go2rtc is on port 1985 on the same host
-      // (1985 instead of 1984 to avoid conflict with Frigate)
-      this._port = 1985;
-    }
-    return this._port;
-  },
-
-  /**
-   * Get go2rtc base URL.
-   * Uses the same host as the current page with go2rtc port.
-   */
-  get baseUrl() {
-    const host = window.location.hostname;
-    return `http://${host}:${this.port}`;
-  },
-
-  /**
    * Generate stream name from stream ID.
    */
   streamName(id) {
@@ -232,34 +213,24 @@ export const go2rtc = {
   },
 
   /**
-   * Get WebRTC stream URL (embedded viewer).
-   * Best for low-latency viewing.
-   */
-  webrtcUrl(id) {
-    return `${this.baseUrl}/stream.html?src=${this.streamName(id)}`;
-  },
-
-  /**
-   * Get WebRTC API URL (for custom integration).
+   * Get WebRTC API URL (for custom WebRTC integration).
+   * Proxied through backend API for reverse proxy compatibility.
    */
   webrtcApiUrl(id) {
-    return `${this.baseUrl}/api/webrtc?src=${this.streamName(id)}`;
+    return `${BASE_URL}/streams/${id}/webrtc`;
   },
 
   /**
    * Get MJPEG stream URL.
-   * Uses proxied endpoint through backend API for HTTPS/reverse proxy compatibility.
-   * Falls back to direct go2rtc if on same origin.
+   * Proxied through backend API for HTTPS/reverse proxy compatibility.
    */
   mjpegUrl(id) {
-    // Use proxied endpoint through backend API
-    // This works through HTTPS reverse proxies without mixed content issues
     return `${BASE_URL}/streams/${id}/mjpeg`;
   },
 
   /**
    * Get single frame (snapshot) URL.
-   * Uses proxied endpoint through backend API for HTTPS compatibility.
+   * Proxied through backend API for HTTPS compatibility.
    */
   frameUrl(id) {
     return `${BASE_URL}/streams/${id}/frame`;
@@ -267,10 +238,10 @@ export const go2rtc = {
 
   /**
    * Get HLS streaming URL.
-   * Good for wide compatibility.
+   * Proxied through backend API for HTTPS compatibility.
    */
   hlsUrl(id) {
-    return `${this.baseUrl}/api/stream.m3u8?src=${this.streamName(id)}`;
+    return `${BASE_URL}/streams/${id}/hls`;
   },
 
   /**
