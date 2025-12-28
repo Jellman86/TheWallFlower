@@ -44,6 +44,13 @@ class ConnectionState(str, Enum):
     STOPPED = "stopped"
 
 
+class CircuitBreakerState(str, Enum):
+    """Circuit breaker states for connection management."""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Blocking requests after failures
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
 @dataclass
 class TranscriptSegment:
     """A segment of transcribed text."""
@@ -80,6 +87,9 @@ class StreamStatus:
     retry_count: int = 0
     next_retry_time: Optional[datetime] = None
     last_successful_connection: Optional[datetime] = None
+    # Circuit breaker for connection management
+    circuit_breaker_state: CircuitBreakerState = CircuitBreakerState.CLOSED
+    consecutive_failures: int = 0
 
 
 class StreamWorker:
