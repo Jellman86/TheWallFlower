@@ -460,82 +460,58 @@ async def get_go2rtc_status() -> Dict[str, Any]:
 
 
 # =============================================================================
-# Video Streaming Endpoints (Legacy - go2rtc preferred)
+# Video Streaming Endpoints (Deprecated - use go2rtc)
 # =============================================================================
 
 @app.get("/api/video/{stream_id}")
-async def video_stream(stream_id: int, max_fps: int = 10):
-    """MJPEG video stream for a specific camera.
+async def video_stream(stream_id: int):
+    """Legacy MJPEG video stream endpoint - DEPRECATED.
 
-    Args:
-        stream_id: The stream to watch
-        max_fps: Maximum frames per second to send (default 10, max 30)
+    Video streaming is now handled by go2rtc for better performance.
+    Use /api/streams/{stream_id}/urls to get go2rtc streaming URLs.
     """
     worker = stream_manager.get_worker(stream_id)
-    if not worker or not worker.mjpeg_streamer:
-        raise HTTPException(status_code=404, detail="Stream not found or not running")
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
 
-    # Clamp max_fps to reasonable range
-    max_fps = max(1, min(max_fps, 30))
-    min_frame_interval = 1.0 / max_fps
+    if not worker.status.is_running:
+        raise HTTPException(status_code=404, detail="Stream not running")
 
-    async def generate():
-        """Generate MJPEG frames with timeout protection and rate limiting."""
-        streamer = worker.mjpeg_streamer
-        no_frame_count = 0
-        max_no_frame_count = 100  # 10 seconds at 0.1s sleep
-        last_frame_time = 0.0
-
-        while True:
-            # Check if worker is still running
-            if not worker.status.is_running:
-                logger.warning(f"Stream {stream_id} stopped, ending video stream")
-                break
-
-            frame = await streamer.get_frame()
-            if frame is None:
-                no_frame_count += 1
-                if no_frame_count >= max_no_frame_count:
-                    logger.warning(f"Stream {stream_id} no frames for 10s, ending video stream")
-                    break
-                await asyncio.sleep(0.1)
-                continue
-
-            # Reset counter when we get a frame
-            no_frame_count = 0
-
-            # Rate limiting - skip frame if too soon
-            current_time = time.monotonic()
-            if current_time - last_frame_time < min_frame_interval:
-                await asyncio.sleep(0.01)  # Small sleep to prevent busy loop
-                continue
-            last_frame_time = current_time
-
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-            )
-
-    return StreamingResponse(
-        generate(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+    # Return helpful error directing to go2rtc
+    urls = stream_manager.get_stream_urls(stream_id)
+    raise HTTPException(
+        status_code=410,  # Gone - indicates this resource is no longer available
+        detail={
+            "message": "Legacy video streaming is deprecated. Use go2rtc for video.",
+            "go2rtc_mjpeg": urls.get("mjpeg"),
+            "go2rtc_webrtc": urls.get("webrtc"),
+            "api_endpoint": f"/api/streams/{stream_id}/urls"
+        }
     )
 
 
 @app.get("/api/snapshot/{stream_id}")
 async def get_snapshot(stream_id: int):
-    """Get a single JPEG snapshot from a stream."""
+    """Get a single JPEG snapshot from a stream.
+
+    Uses go2rtc frame endpoint for snapshots.
+    """
     worker = stream_manager.get_worker(stream_id)
-    if not worker or not worker.mjpeg_streamer:
-        raise HTTPException(status_code=404, detail="Stream not found or not running")
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
 
-    frame = worker.mjpeg_streamer.current_frame
-    if not frame:
-        raise HTTPException(status_code=503, detail="No frame available")
+    if not worker.status.is_running:
+        raise HTTPException(status_code=404, detail="Stream not running")
 
-    return StreamingResponse(
-        iter([frame]),
-        media_type="image/jpeg"
+    # Redirect to go2rtc frame endpoint
+    urls = stream_manager.get_stream_urls(stream_id)
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "message": "Use go2rtc for snapshots",
+            "go2rtc_frame": urls.get("frame"),
+            "api_endpoint": f"/api/streams/{stream_id}/urls"
+        }
     )
 
 

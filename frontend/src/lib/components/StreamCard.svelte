@@ -1,5 +1,5 @@
 <script>
-  import { video, status, transcripts, control, go2rtc, API_BASE } from '../services/api.js';
+  import { status, transcripts, control, go2rtc, API_BASE } from '../services/api.js';
   import Icon from './Icons.svelte';
 
   let {
@@ -8,9 +8,6 @@
     onFocus = () => {},
     focused = false
   } = $props();
-
-  // Video mode: 'go2rtc' (default, efficient) or 'legacy' (Python MJPEG)
-  let videoMode = $state('go2rtc');
 
   let streamStatus = $state(null);
   let transcriptList = $state([]);
@@ -154,16 +151,6 @@
   }
 
   function handleImageError() {
-    // If using go2rtc and first failure, try fallback to legacy
-    if (videoMode === 'go2rtc' && imageRetryCount === 0) {
-      console.log(`Stream ${stream.id}: go2rtc failed, falling back to legacy mode`);
-      videoMode = 'legacy';
-      imageRetryCount = 0;
-      imageError = false;
-      imageCacheBuster = Date.now();
-      return;
-    }
-
     // Only handle error if we haven't exceeded max retries
     if (imageRetryCount >= MAX_IMAGE_RETRIES) {
       imageError = true;
@@ -173,8 +160,8 @@
     imageError = true;
     imageRetryCount++;
 
-    // Exponential backoff for image retries (1s, 2s, 4s, 8s, 16s)
-    const delay = Math.min(1000 * Math.pow(2, imageRetryCount - 1), 16000);
+    // Exponential backoff for image retries (2s, 4s, 8s, 16s, 32s)
+    const delay = Math.min(2000 * Math.pow(2, imageRetryCount - 1), 32000);
 
     if (imageRetryTimeout) clearTimeout(imageRetryTimeout);
     imageRetryTimeout = setTimeout(() => {
@@ -194,7 +181,6 @@
     imageError = false;
     imageRetryCount = 0;
     imageCacheBuster = Date.now();
-    videoMode = 'go2rtc'; // Reset to preferred mode on manual retry
   }
 
   async function handleForceRetry() {
@@ -324,19 +310,10 @@
 
   <!-- Video with error handling -->
   <div class="relative">
-    {#if showImage && videoMode === 'go2rtc'}
+    {#if showImage}
       <!-- go2rtc MJPEG streaming - efficient, low CPU -->
       <img
-        src="{go2rtc.mjpegUrl(stream.id)}"
-        alt={stream.name}
-        class="stream-video"
-        onerror={handleImageError}
-        onload={handleImageLoad}
-      />
-    {:else if showImage && videoMode === 'legacy'}
-      <!-- Legacy Python MJPEG streaming -->
-      <img
-        src="{video.streamUrl(stream.id)}?t={imageCacheBuster}"
+        src="{go2rtc.mjpegUrl(stream.id)}?t={imageCacheBuster}"
         alt={stream.name}
         class="stream-video"
         onerror={handleImageError}

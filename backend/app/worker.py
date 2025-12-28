@@ -1,12 +1,12 @@
 """Stream worker for TheWallflower.
 
-Handles video capture and audio extraction from RTSP streams,
-running frame processors and connecting to WhisperLive for transcription.
+Handles audio extraction from RTSP streams for WhisperLive transcription.
 
 With go2rtc integration:
-- go2rtc handles the primary RTSP connection and video streaming
-- This worker provides fallback video and audio extraction for Whisper
-- Audio is extracted from go2rtc's RTSP restream when available
+- go2rtc handles ALL video streaming (RTSP → WebRTC/MJPEG)
+- This worker ONLY handles audio extraction for Whisper transcription
+- Audio is extracted from go2rtc's RTSP restream (localhost:8654)
+- No OpenCV video processing - eliminates CPU overhead and browser hangs
 """
 
 import asyncio
@@ -21,12 +21,9 @@ from enum import Enum
 from typing import List, Optional, Callable
 import json
 
-import cv2
-import numpy as np
 import websockets
 
 from app.models import StreamConfig, TranscriptCreate
-from app.processors import FrameProcessor, MjpegStreamer, SnapshotProcessor
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster
 
@@ -34,29 +31,17 @@ logger = logging.getLogger(__name__)
 
 # Reconnection backoff configuration
 WHISPER_RECONNECT_BACKOFF = [1, 2, 5, 10, 30, 60]  # seconds
-VIDEO_RECONNECT_BACKOFF = [1, 2, 4, 8, 16, 30, 60, 120]  # seconds, exponential
 FFMPEG_RESTART_DELAY = 2  # seconds
 THREAD_HEALTH_CHECK_INTERVAL = 10  # seconds
 
-# Circuit breaker configuration
-MAX_CONSECUTIVE_FAILURES = 10  # Before circuit breaker opens
-CIRCUIT_BREAKER_RESET_TIME = 300  # 5 minutes before half-open
-
 
 class ConnectionState(str, Enum):
-    """Stream connection states."""
+    """Stream connection states (for audio/whisper)."""
     CONNECTING = "connecting"
     CONNECTED = "connected"
     RETRYING = "retrying"
     FAILED = "failed"
     STOPPED = "stopped"
-
-
-class CircuitBreakerState(str, Enum):
-    """Circuit breaker states."""
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Failing, rejecting connections
-    HALF_OPEN = "half_open"  # Testing if recovered
 
 
 @dataclass
@@ -70,37 +55,39 @@ class TranscriptSegment:
 
 @dataclass
 class StreamStatus:
-    """Current status of a stream worker."""
+    """Current status of a stream worker.
+
+    Note: Video is handled by go2rtc (external). This tracks audio/Whisper status.
+    video_connected is always True when running (go2rtc handles video).
+    """
     stream_id: int
     is_running: bool = False
-    video_connected: bool = False
+    video_connected: bool = False  # Always True when running (go2rtc handles it)
     audio_connected: bool = False
     whisper_connected: bool = False
-    fps: float = 0.0
+    fps: float = 0.0  # Placeholder - actual FPS from go2rtc
     error: Optional[str] = None
     last_transcript: Optional[str] = None
-    # Health tracking
-    video_thread_alive: bool = False
+    # Health tracking (audio thread only now)
+    video_thread_alive: bool = False  # Deprecated - kept for API compatibility
     audio_thread_alive: bool = False
     ffmpeg_restarts: int = 0
     whisper_reconnects: int = 0
-    last_frame_time: Optional[datetime] = None
+    last_frame_time: Optional[datetime] = None  # Deprecated - kept for API compatibility
     last_audio_time: Optional[datetime] = None
-    # Enhanced connection tracking
+    # Connection tracking for audio/Whisper
     connection_state: ConnectionState = ConnectionState.STOPPED
     retry_count: int = 0
     next_retry_time: Optional[datetime] = None
     last_successful_connection: Optional[datetime] = None
-    circuit_breaker_state: CircuitBreakerState = CircuitBreakerState.CLOSED
-    consecutive_failures: int = 0
 
 
 class StreamWorker:
-    """Worker that processes a single RTSP stream.
+    """Worker that handles audio extraction for WhisperLive transcription.
 
-    Manages two threads:
-    - Video thread: Captures frames via OpenCV, runs processors
-    - Audio thread: Extracts audio via FFmpeg, sends to WhisperLive
+    Video streaming is handled by go2rtc (external process).
+    This worker only manages:
+    - Audio thread: Extracts audio via FFmpeg from go2rtc restream, sends to WhisperLive
     """
 
     def __init__(
@@ -117,17 +104,12 @@ class StreamWorker:
 
         # Thread control
         self._stop_event = threading.Event()
-        self._video_thread: Optional[threading.Thread] = None
         self._audio_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._ffmpeg_process: Optional[subprocess.Popen] = None
 
         # Status
         self._status = StreamStatus(stream_id=config.id)
-
-        # Processors
-        self._processors: List[FrameProcessor] = []
-        self._mjpeg_streamer: Optional[MjpegStreamer] = None
 
         # Transcript buffer
         self._transcript_segments: List[TranscriptSegment] = []
@@ -150,32 +132,22 @@ class StreamWorker:
             "audio_thread_alive": status.audio_thread_alive,
             "ffmpeg_restarts": status.ffmpeg_restarts,
             "whisper_reconnects": status.whisper_reconnects,
-            # Enhanced connection tracking
+            # Connection tracking (for audio/Whisper)
             "connection_state": status.connection_state.value,
             "retry_count": status.retry_count,
             "next_retry_time": status.next_retry_time.isoformat() if status.next_retry_time else None,
-            "circuit_breaker_state": status.circuit_breaker_state.value,
-            "consecutive_failures": status.consecutive_failures,
         })
 
     @property
     def status(self) -> StreamStatus:
         """Get current stream status with thread health."""
-        if self._mjpeg_streamer:
-            self._status.fps = self._mjpeg_streamer.fps
-        # Update thread health status
-        self._status.video_thread_alive = (
-            self._video_thread is not None and self._video_thread.is_alive()
-        )
+        # Video is handled by go2rtc - always "connected" when running
+        self._status.video_thread_alive = self._status.is_running
+        # Audio thread health
         self._status.audio_thread_alive = (
             self._audio_thread is not None and self._audio_thread.is_alive()
         )
         return self._status
-
-    @property
-    def mjpeg_streamer(self) -> Optional[MjpegStreamer]:
-        """Get the MJPEG streamer for this worker."""
-        return self._mjpeg_streamer
 
     @property
     def transcripts(self) -> List[TranscriptSegment]:
@@ -211,7 +183,11 @@ class StreamWorker:
             logger.error(f"Failed to write transcript to file: {e}")
 
     def start(self) -> None:
-        """Start the stream worker."""
+        """Start the stream worker.
+
+        Video streaming is handled by go2rtc (added via stream_manager).
+        This only starts the audio thread for Whisper transcription.
+        """
         if self._status.is_running:
             logger.warning(f"Stream {self.config.id} already running")
             return
@@ -219,19 +195,10 @@ class StreamWorker:
         logger.info(f"Starting stream worker for {self.config.name} ({self.config.id})")
         self._stop_event.clear()
         self._status.is_running = True
+        self._status.video_connected = True  # go2rtc handles video
+        self._status.connection_state = ConnectionState.CONNECTED
         self._status.error = None
         self._emit_status_event()
-
-        # Initialize processors
-        self._setup_processors()
-
-        # Start video thread
-        self._video_thread = threading.Thread(
-            target=self._video_loop,
-            name=f"video-{self.config.id}",
-            daemon=True
-        )
-        self._video_thread.start()
 
         # Start audio thread if whisper is enabled
         if self.config.whisper_enabled:
@@ -241,6 +208,9 @@ class StreamWorker:
                 daemon=True
             )
             self._audio_thread.start()
+            logger.info(f"Audio thread started for stream {self.config.id}")
+        else:
+            logger.info(f"Whisper disabled for stream {self.config.id}, no audio thread")
 
     def stop(self) -> None:
         """Stop the stream worker."""
@@ -251,184 +221,27 @@ class StreamWorker:
         self._stop_event.set()
         self._status.is_running = False
 
-        # Stop processors
-        for processor in self._processors:
+        # Stop FFmpeg process if running
+        if self._ffmpeg_process:
             try:
-                processor.stop()
+                self._ffmpeg_process.terminate()
+                self._ffmpeg_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._ffmpeg_process.kill()
+                self._ffmpeg_process.wait()
             except Exception as e:
-                logger.error(f"Error stopping processor {processor.name}: {e}")
+                logger.error(f"Error stopping FFmpeg: {e}")
+            self._ffmpeg_process = None
 
-        # Wait for threads to finish
-        if self._video_thread and self._video_thread.is_alive():
-            self._video_thread.join(timeout=5.0)
+        # Wait for audio thread to finish
         if self._audio_thread and self._audio_thread.is_alive():
             self._audio_thread.join(timeout=5.0)
 
         self._status.video_connected = False
         self._status.audio_connected = False
         self._status.whisper_connected = False
-        self._emit_status_event()
-
-    def _setup_processors(self) -> None:
-        """Initialize frame processors."""
-        self._processors = []
-
-        # Always add MJPEG streamer
-        self._mjpeg_streamer = MjpegStreamer(self.config.id)
-        self._processors.append(self._mjpeg_streamer)
-
-        # Add snapshot processor
-        self._processors.append(SnapshotProcessor(self.config.id))
-
-        # Future: Add face detection processor if enabled
-        # if self.config.face_detection_enabled:
-        #     self._processors.append(FaceDetectionProcessor(self.config.id))
-
-        # Start all processors
-        for processor in self._processors:
-            processor.start()
-
-    def _video_loop(self) -> None:
-        """Main video capture and processing loop with exponential backoff and circuit breaker."""
-        logger.info(f"Video thread started for stream {self.config.id}")
-
-        cap = None
-        retry_count = 0
-        processor_failures: dict[str, int] = {}
-        circuit_breaker_opened_at: Optional[float] = None
-
-        while not self._stop_event.is_set():
-            # Circuit breaker check
-            if self._status.circuit_breaker_state == CircuitBreakerState.OPEN:
-                if circuit_breaker_opened_at is None:
-                    circuit_breaker_opened_at = time.time()
-
-                time_since_open = time.time() - circuit_breaker_opened_at
-                if time_since_open < CIRCUIT_BREAKER_RESET_TIME:
-                    # Still in cooldown - wait and check periodically
-                    remaining = int(CIRCUIT_BREAKER_RESET_TIME - time_since_open)
-                    self._status.connection_state = ConnectionState.FAILED
-                    self._status.error = f"Connection failed repeatedly. Auto-retry in {remaining}s"
-                    self._emit_status_event()
-                    time.sleep(10)
-                    continue
-                else:
-                    # Try half-open state
-                    self._status.circuit_breaker_state = CircuitBreakerState.HALF_OPEN
-                    circuit_breaker_opened_at = None
-                    logger.info(f"Stream {self.config.id}: Circuit breaker half-open, attempting reconnection")
-
-            try:
-                # Open video capture
-                if cap is None or not cap.isOpened():
-                    self._status.connection_state = (
-                        ConnectionState.CONNECTING if retry_count == 0
-                        else ConnectionState.RETRYING
-                    )
-                    self._status.retry_count = retry_count
-                    self._emit_status_event()
-
-                    logger.info(f"Connecting to RTSP (attempt {retry_count + 1}): {self.config.rtsp_url}")
-
-                    # Use FFMPEG backend for better RTSP support
-                    cap = cv2.VideoCapture(self.config.rtsp_url, cv2.CAP_FFMPEG)
-
-                    # Set timeouts (OpenCV 4.5+)
-                    try:
-                        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)  # 10s connection timeout
-                        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)   # 5s read timeout
-                    except Exception:
-                        pass  # Older OpenCV versions may not support these
-
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
-
-                    if not cap.isOpened():
-                        retry_count += 1
-                        self._status.consecutive_failures += 1
-
-                        # Check circuit breaker threshold
-                        if self._status.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                            self._status.circuit_breaker_state = CircuitBreakerState.OPEN
-                            self._status.connection_state = ConnectionState.FAILED
-                            self._status.error = f"Connection failed {MAX_CONSECUTIVE_FAILURES} times - pausing retries"
-                            circuit_breaker_opened_at = time.time()
-                            logger.error(f"Stream {self.config.id}: Circuit breaker opened after {MAX_CONSECUTIVE_FAILURES} failures")
-                            self._emit_status_event()
-                            continue
-
-                        # Exponential backoff
-                        backoff_idx = min(retry_count - 1, len(VIDEO_RECONNECT_BACKOFF) - 1)
-                        delay = VIDEO_RECONNECT_BACKOFF[backoff_idx]
-
-                        self._status.next_retry_time = datetime.now() + timedelta(seconds=delay)
-                        self._status.error = f"Connection failed, retry #{retry_count} in {delay}s"
-                        self._emit_status_event()
-
-                        logger.warning(f"Stream {self.config.id}: Retry {retry_count}, waiting {delay}s")
-                        time.sleep(delay)
-                        continue
-
-                    # Success!
-                    self._status.video_connected = True
-                    self._status.connection_state = ConnectionState.CONNECTED
-                    self._status.error = None
-                    self._status.consecutive_failures = 0
-                    self._status.circuit_breaker_state = CircuitBreakerState.CLOSED
-                    self._status.last_successful_connection = datetime.now()
-                    self._status.next_retry_time = None
-                    retry_count = 0
-                    logger.info(f"Connected to stream {self.config.id}")
-                    self._emit_status_event()
-
-                # Read frame
-                ret, frame = cap.read()
-                if not ret:
-                    logger.warning(f"Failed to read frame from stream {self.config.id}")
-                    cap.release()
-                    cap = None
-                    self._status.video_connected = False
-                    self._status.connection_state = ConnectionState.RETRYING
-                    self._emit_status_event()
-                    time.sleep(1)
-                    continue
-
-                # Track last successful frame time
-                self._status.last_frame_time = datetime.now()
-
-                # Run frame through all processors with isolation
-                for processor in self._processors:
-                    try:
-                        frame = processor.process(frame)
-                        processor_failures[processor.name] = 0
-                    except Exception as e:
-                        processor_failures[processor.name] = processor_failures.get(processor.name, 0) + 1
-                        failure_count = processor_failures[processor.name]
-
-                        if failure_count <= 3:
-                            logger.error(f"Processor {processor.name} error ({failure_count}): {e}")
-                        elif failure_count == 4:
-                            logger.error(f"Processor {processor.name} failing repeatedly, suppressing logs")
-
-            except Exception as e:
-                logger.error(f"Video loop error for stream {self.config.id}: {e}")
-                self._status.error = str(e)
-                if cap:
-                    cap.release()
-                    cap = None
-                retry_count += 1
-                self._status.consecutive_failures += 1
-
-                # Exponential backoff on exception too
-                backoff_idx = min(retry_count - 1, len(VIDEO_RECONNECT_BACKOFF) - 1)
-                delay = VIDEO_RECONNECT_BACKOFF[backoff_idx]
-                time.sleep(delay)
-
-        # Cleanup
-        if cap:
-            cap.release()
-        self._status.video_connected = False
         self._status.connection_state = ConnectionState.STOPPED
-        logger.info(f"Video thread stopped for stream {self.config.id}")
+        self._emit_status_event()
 
     def _audio_loop(self) -> None:
         """Audio extraction and WhisperLive connection loop with exponential backoff."""

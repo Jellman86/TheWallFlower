@@ -410,9 +410,10 @@ class StreamManager:
             time.sleep(self._health_check_interval)
 
     def _check_thread_health(self) -> None:
-        """Check all workers and resurrect dead threads."""
-        from datetime import datetime
+        """Check all workers and resurrect dead audio threads.
 
+        Note: Video is handled by go2rtc (external). We only monitor audio threads.
+        """
         with self._workers_lock:
             for stream_id, worker in list(self._workers.items()):
                 status = worker.status
@@ -421,39 +422,11 @@ class StreamManager:
                 if not status.is_running:
                     continue
 
-                # Check if video thread died unexpectedly
-                if not status.video_thread_alive:
-                    logger.warning(f"Stream {stream_id}: Video thread dead, resurrecting")
-                    self._resurrect_video_thread(worker)
-
                 # Check if audio thread died unexpectedly (when whisper is enabled)
                 if (worker.config.whisper_enabled and
                     not status.audio_thread_alive):
                     logger.warning(f"Stream {stream_id}: Audio thread dead, resurrecting")
                     self._resurrect_audio_thread(worker)
-
-                # Check for stale streams (no frames for too long)
-                if status.video_connected and status.last_frame_time:
-                    time_since_frame = (datetime.now() - status.last_frame_time).total_seconds()
-                    if time_since_frame > FRAME_TIMEOUT_THRESHOLD:
-                        logger.warning(f"Stream {stream_id}: No frames for {int(time_since_frame)}s, marking stale")
-                        worker._status.video_connected = False
-                        worker._status.error = f"Stream stale - no frames for {int(time_since_frame)}s"
-                        worker._status.connection_state = ConnectionState.RETRYING
-                        worker._emit_status_event()
-
-    def _resurrect_video_thread(self, worker: StreamWorker) -> None:
-        """Resurrect a dead video thread."""
-        try:
-            worker._video_thread = threading.Thread(
-                target=worker._video_loop,
-                name=f"video-{worker.config.id}",
-                daemon=True
-            )
-            worker._video_thread.start()
-            logger.info(f"Stream {worker.config.id}: Video thread resurrected")
-        except Exception as e:
-            logger.error(f"Stream {worker.config.id}: Failed to resurrect video thread: {e}")
 
     def _resurrect_audio_thread(self, worker: StreamWorker) -> None:
         """Resurrect a dead audio thread."""
