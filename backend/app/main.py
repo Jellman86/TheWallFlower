@@ -460,16 +460,23 @@ async def get_go2rtc_status() -> Dict[str, Any]:
 
 
 # =============================================================================
-# Video Streaming Endpoints (Deprecated - use go2rtc)
+# Video Streaming Endpoints (Proxied through go2rtc)
 # =============================================================================
 
-@app.get("/api/video/{stream_id}")
-async def video_stream(stream_id: int):
-    """Legacy MJPEG video stream endpoint - DEPRECATED.
+@app.get("/api/streams/{stream_id}/mjpeg")
+async def stream_mjpeg_proxy(stream_id: int, fps: int = 10, height: int = 720):
+    """Proxy MJPEG stream from go2rtc.
 
-    Video streaming is now handled by go2rtc for better performance.
-    Use /api/streams/{stream_id}/urls to get go2rtc streaming URLs.
+    This endpoint proxies the MJPEG stream from go2rtc so it works
+    through reverse proxies and HTTPS without mixed content issues.
+
+    Args:
+        stream_id: Stream ID to view
+        fps: Max frames per second (default 10)
+        height: Max height in pixels (default 720)
     """
+    import httpx
+
     worker = stream_manager.get_worker(stream_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Stream not found")
@@ -477,25 +484,45 @@ async def video_stream(stream_id: int):
     if not worker.status.is_running:
         raise HTTPException(status_code=404, detail="Stream not running")
 
-    # Return helpful error directing to go2rtc
-    urls = stream_manager.get_stream_urls(stream_id)
-    raise HTTPException(
-        status_code=410,  # Gone - indicates this resource is no longer available
-        detail={
-            "message": "Legacy video streaming is deprecated. Use go2rtc for video.",
-            "go2rtc_mjpeg": urls.get("mjpeg"),
-            "go2rtc_webrtc": urls.get("webrtc"),
-            "api_endpoint": f"/api/streams/{stream_id}/urls"
+    # Build go2rtc MJPEG URL (internal, localhost)
+    stream_name = f"camera_{stream_id}"
+    go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/stream.mjpeg?src={stream_name}&fps={fps}&height={height}"
+
+    async def proxy_stream():
+        """Proxy the MJPEG stream from go2rtc."""
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", go2rtc_url) as response:
+                    if response.status_code != 200:
+                        logger.error(f"go2rtc returned {response.status_code} for stream {stream_id}")
+                        return
+                    async for chunk in response.aiter_bytes(chunk_size=32768):
+                        yield chunk
+        except httpx.ConnectError:
+            logger.error(f"Failed to connect to go2rtc for stream {stream_id}")
+        except Exception as e:
+            logger.error(f"MJPEG proxy error for stream {stream_id}: {e}")
+
+    return StreamingResponse(
+        proxy_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
         }
     )
 
 
-@app.get("/api/snapshot/{stream_id}")
-async def get_snapshot(stream_id: int):
-    """Get a single JPEG snapshot from a stream.
+@app.get("/api/streams/{stream_id}/frame")
+async def stream_frame_proxy(stream_id: int):
+    """Proxy single frame (snapshot) from go2rtc.
 
-    Uses go2rtc frame endpoint for snapshots.
+    Args:
+        stream_id: Stream ID to get frame from
     """
+    import httpx
+
     worker = stream_manager.get_worker(stream_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Stream not found")
@@ -503,16 +530,23 @@ async def get_snapshot(stream_id: int):
     if not worker.status.is_running:
         raise HTTPException(status_code=404, detail="Stream not running")
 
-    # Redirect to go2rtc frame endpoint
-    urls = stream_manager.get_stream_urls(stream_id)
-    raise HTTPException(
-        status_code=410,
-        detail={
-            "message": "Use go2rtc for snapshots",
-            "go2rtc_frame": urls.get("frame"),
-            "api_endpoint": f"/api/streams/{stream_id}/urls"
-        }
-    )
+    # Build go2rtc frame URL (internal, localhost)
+    stream_name = f"camera_{stream_id}"
+    go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/frame.jpeg?src={stream_name}"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.get(go2rtc_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail="Failed to get frame from go2rtc")
+            return StreamingResponse(
+                iter([response.content]),
+                media_type="image/jpeg"
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="go2rtc not available")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout getting frame")
 
 
 # =============================================================================

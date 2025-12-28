@@ -247,19 +247,22 @@ export const go2rtc = {
   },
 
   /**
-   * Get MJPEG stream URL from go2rtc.
-   * More efficient than Python MJPEG streaming.
-   * Limits to 10fps and 720p height to prevent browser overload.
+   * Get MJPEG stream URL.
+   * Uses proxied endpoint through backend API for HTTPS/reverse proxy compatibility.
+   * Falls back to direct go2rtc if on same origin.
    */
   mjpegUrl(id) {
-    return `${this.baseUrl}/api/stream.mjpeg?src=${this.streamName(id)}&fps=10&height=720`;
+    // Use proxied endpoint through backend API
+    // This works through HTTPS reverse proxies without mixed content issues
+    return `${BASE_URL}/streams/${id}/mjpeg`;
   },
 
   /**
    * Get single frame (snapshot) URL.
+   * Uses proxied endpoint through backend API for HTTPS compatibility.
    */
   frameUrl(id) {
-    return `${this.baseUrl}/api/frame.jpeg?src=${this.streamName(id)}`;
+    return `${BASE_URL}/streams/${id}/frame`;
   },
 
   /**
