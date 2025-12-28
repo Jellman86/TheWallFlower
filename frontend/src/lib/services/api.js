@@ -249,9 +249,10 @@ export const go2rtc = {
   /**
    * Get MJPEG stream URL from go2rtc.
    * More efficient than Python MJPEG streaming.
+   * Limits to 10fps and 720p height to prevent browser overload.
    */
   mjpegUrl(id) {
-    return `${this.baseUrl}/api/stream.mjpeg?src=${this.streamName(id)}`;
+    return `${this.baseUrl}/api/stream.mjpeg?src=${this.streamName(id)}&fps=10&height=720`;
   },
 
   /**
