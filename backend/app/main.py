@@ -9,7 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+# Added Request/Response imports to fix NameErrors in proxy endpoints
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
