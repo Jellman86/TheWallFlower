@@ -104,11 +104,37 @@
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      // Wait for ICE gathering to complete (or timeout)
+      // This ensures the SDP we send contains the necessary candidates
+      // Crucial for connectivity when not on localhost
+      await new Promise(resolve => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+          return;
+        }
+        
+        const checkState = () => {
+          if (pc.iceGatheringState === 'complete') {
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        };
+        
+        pc.addEventListener('icegatheringstatechange', checkState);
+        
+        // Wait max 1s for candidates - usually sufficient for local/LAN
+        // If gathering takes longer, we'll send what we have
+        setTimeout(() => {
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+        }, 1000);
+      });
+
       // Send to backend
       const response = await fetch(go2rtc.webrtcApiUrl(streamId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/sdp' },
-        body: offer.sdp
+        body: pc.localDescription.sdp // Use localDescription to include candidates
       });
 
       if (!response.ok) {
