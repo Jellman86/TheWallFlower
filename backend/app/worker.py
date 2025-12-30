@@ -1,4 +1,4 @@
-"Stream worker for TheWallflower.
+"""Stream worker for TheWallflower.
 
 Handles audio extraction from RTSP streams for WhisperLive transcription.
 
@@ -7,7 +7,7 @@ With go2rtc integration:
 - This worker ONLY handles audio extraction for Whisper transcription
 - Audio is extracted from go2rtc's RTSP restream (localhost:8654)
 - No OpenCV video processing - eliminates CPU overhead and browser hangs
-"
+"""
 
 import asyncio
 import logging
