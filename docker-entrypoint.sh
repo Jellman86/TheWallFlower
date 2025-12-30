@@ -119,10 +119,9 @@ python -c "from app.db import init_db; init_db()" 2>/dev/null || {
 # Start go2rtc for efficient video streaming
 # =============================================================================
 
-# Create default go2rtc config if it doesn't exist
-if [ ! -f "$GO2RTC_CONFIG_PATH" ]; then
-    log_info "Creating default go2rtc configuration..."
-    cat > "$GO2RTC_CONFIG_PATH" << EOYAML
+# Create/Overwrite go2rtc config (Always overwrite to ensure validity)
+log_info "Generating go2rtc configuration..."
+cat > "$GO2RTC_CONFIG_PATH" << EOYAML
 # go2rtc configuration for TheWallflower
 api:
   listen: ":${GO2RTC_PORT}"
@@ -137,7 +136,6 @@ webrtc:
 log:
   level: info
 EOYAML
-fi
 
 # Start go2rtc in background
 log_info "Starting go2rtc..."
