@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Generator
 
 from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy import event
 
 from app.config import settings
 
@@ -50,7 +51,16 @@ engine = create_engine(
     connect_args={"check_same_thread": False}  # Required for SQLite with FastAPI
 )
 
-logger.info(f"Database configured: {_database_url}")
+# Enable Write-Ahead Logging (WAL) for better concurrency
+if _database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+logger.info(f"Database configured: {_database_url} (WAL Mode enabled)")
 
 
 def init_db() -> None:
