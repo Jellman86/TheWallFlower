@@ -124,9 +124,6 @@ if [ ! -f "$GO2RTC_CONFIG_PATH" ]; then
     log_info "Creating default go2rtc configuration..."
     cat > "$GO2RTC_CONFIG_PATH" << EOYAML
 # go2rtc configuration for TheWallflower
-# Streams are managed dynamically via API
-# Ports offset from Frigate defaults (1984/8554/8555) to avoid conflicts
-
 api:
   listen: ":${GO2RTC_PORT}"
   origin: "*"
@@ -136,11 +133,6 @@ rtsp:
 
 webrtc:
   listen: ":${GO2RTC_WEBRTC_PORT}"
-  candidates:
-    - stun:${GO2RTC_WEBRTC_PORT}
-
-# Streams are added dynamically via API when cameras are started
-streams: {}
 
 log:
   level: info
