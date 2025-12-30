@@ -44,4 +44,4 @@ Thumbs.db
 htmlcov/
 
 # Agents - project documentation and plans
-# agents/  # Uncomment to ignore local agent files
+agents/
