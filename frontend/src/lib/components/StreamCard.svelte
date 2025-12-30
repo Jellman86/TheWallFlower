@@ -1,6 +1,8 @@
 <script>
   import { status, transcripts, control, go2rtc, API_BASE } from '../services/api.js';
+  import { streamEvents } from '../stores/streamEvents.svelte.js';
   import Icon from './Icons.svelte';
+  import WebRTCPlayer from './WebRTCPlayer.svelte';
 
   let {
     stream,
@@ -9,22 +11,27 @@
     focused = false
   } = $props();
 
-  let streamStatus = $state(null);
-  let transcriptList = $state([]);
+  // Use global store for status and transcripts
+  let streamStatus = $derived(streamEvents.getStreamStatus(stream.id));
+  let transcriptList = $derived(streamEvents.getTranscripts(stream.id));
+
   let isLoading = $state(false);
   let showTranscripts = $state(true);
-  let eventSource = $state(null);
-  let reconnectTimeout = $state(null);
+  
+  // Streaming mode: 'webrtc' or 'mjpeg'
+  // TODO: Move this to global settings or per-stream config
+  let streamMode = $state('webrtc'); 
 
-  // Image error handling - use a stable cache buster that only changes on manual retry
+  // Image error handling (Legacy MJPEG)
   let imageError = $state(false);
   let imageRetryCount = $state(0);
   let imageRetryTimeout = $state(null);
-  let imageCacheBuster = $state(Date.now()); // Only changes on explicit retry
+  let imageCacheBuster = $state(Date.now()); 
   let isForceRetrying = $state(false);
-  let sseError = $state(null);
 
-  // Max retries before giving up on image
+  // WebRTC State
+  let webrtcStatus = $state('connecting'); // connecting, connected, error
+
   const MAX_IMAGE_RETRIES = 5;
 
   // Derived state
@@ -37,137 +44,55 @@
   let retryCount = $derived(streamStatus?.retry_count ?? 0);
   let circuitBreakerOpen = $derived(streamStatus?.circuit_breaker_state === 'open');
 
-  // Computed display state
+  // Computed display state (Logic unified for both modes)
   let displayState = $derived.by(() => {
     if (!isRunning) return 'stopped';
     if (circuitBreakerOpen) return 'failed';
+    // If WebRTC is active, use its status
+    if (streamMode === 'webrtc') {
+        if (webrtcStatus === 'connected') return 'connected';
+        if (webrtcStatus === 'error') return 'retrying'; // Or failed?
+        return 'connecting';
+    }
+    // Fallback logic for MJPEG
     if (connectionState === 'connected' && isConnected) return 'connected';
     if (connectionState === 'retrying') return 'retrying';
     return 'connecting';
   });
 
-  // Whether to show the image (connected and not too many errors)
-  let showImage = $derived(isConnected && !imageError && imageRetryCount < MAX_IMAGE_RETRIES);
+  // Whether to show the image (MJPEG Mode)
+  let showImage = $derived(streamMode === 'mjpeg' && isConnected && !imageError && imageRetryCount < MAX_IMAGE_RETRIES);
 
-  // Connect to SSE for real-time updates
   $effect(() => {
     const currentStreamId = stream?.id;
     if (!currentStreamId) return;
 
-    // Initial fetch for immediate data
     fetchStatus();
     if (stream.whisper_enabled) {
       fetchTranscripts();
     }
 
-    // Connect to SSE
-    connectSSE();
-
-    // Cleanup function
     return () => {
-      cleanupAll();
+      if (imageRetryTimeout) {
+        clearTimeout(imageRetryTimeout);
+        imageRetryTimeout = null;
+      }
     };
   });
 
-  function cleanupAll() {
-    // Clear all timeouts
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = null;
-    }
-    if (imageRetryTimeout) {
-      clearTimeout(imageRetryTimeout);
-      imageRetryTimeout = null;
-    }
-    // Close SSE
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-  }
-
-  function connectSSE() {
-    // Close existing connection first
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-
-    const url = `${API_BASE}/streams/${stream.id}/events`;
-    eventSource = new EventSource(url);
-
-    eventSource.addEventListener('status', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        streamStatus = data.data;
-        // Reset image error state when status shows connected
-        if (data.data?.video_connected && imageError) {
-          imageError = false;
-          imageRetryCount = 0;
-          imageCacheBuster = Date.now(); // Force reload with new cache buster
-        }
-      } catch (e) {
-        console.error('Failed to parse status event:', e);
-      }
-    });
-
-    eventSource.addEventListener('transcript', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        const transcript = data.data;
-        // Add to front of list (newest first)
-        transcriptList = [transcript, ...transcriptList.slice(0, 9)];
-      } catch (e) {
-        console.error('Failed to parse transcript event:', e);
-      }
-    });
-
-    eventSource.addEventListener('error', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        sseError = data.data?.error || 'Stream error occurred';
-        console.error('Stream error:', data.data?.error);
-      } catch (e) {
-        // Connection error, not a data error - ignore parse errors
-      }
-    });
-
-    eventSource.onerror = () => {
-      sseError = 'Connection to server lost';
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
-
-      // Reconnect after 5 seconds - but only if we haven't been cleaned up
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      reconnectTimeout = setTimeout(() => {
-        if (stream?.id) {
-          sseError = null;
-          connectSSE();
-        }
-      }, 5000);
-    };
-  }
-
   function handleImageError() {
-    // Only handle error if we haven't exceeded max retries
     if (imageRetryCount >= MAX_IMAGE_RETRIES) {
       imageError = true;
       return;
     }
-
     imageError = true;
     imageRetryCount++;
-
-    // Exponential backoff for image retries (2s, 4s, 8s, 16s, 32s)
     const delay = Math.min(2000 * Math.pow(2, imageRetryCount - 1), 32000);
-
     if (imageRetryTimeout) clearTimeout(imageRetryTimeout);
     imageRetryTimeout = setTimeout(() => {
       if (imageRetryCount < MAX_IMAGE_RETRIES) {
         imageError = false;
-        imageCacheBuster = Date.now(); // Update cache buster for retry
+        imageCacheBuster = Date.now();
       }
     }, delay);
   }
@@ -181,13 +106,17 @@
     imageError = false;
     imageRetryCount = 0;
     imageCacheBuster = Date.now();
+    // Also reset WebRTC if needed via key change or explicit method (not implemented yet)
+  }
+  
+  function handleWebRTCStatus(status) {
+    webrtcStatus = status;
   }
 
   async function handleForceRetry() {
     isForceRetrying = true;
     try {
       await control.forceRetry(stream.id);
-      // Reset image state
       handleManualImageRetry();
     } catch (e) {
       console.error('Failed to force retry:', e);
@@ -195,20 +124,9 @@
     isForceRetrying = false;
   }
 
-  function disconnectSSE() {
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = null;
-    }
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-  }
-
   async function fetchStatus() {
     try {
-      streamStatus = await status.get(stream.id);
+      await status.get(stream.id);
     } catch (e) {
       console.error('Failed to fetch status:', e);
     }
@@ -216,18 +134,16 @@
 
   async function fetchTranscripts() {
     try {
-      const result = await transcripts.get(stream.id, 10);
-      transcriptList = result.transcripts || [];
+      await transcripts.get(stream.id, 10);
     } catch (e) {
       // Stream might not be running
     }
   }
-
+  
   async function handleStart() {
     isLoading = true;
     try {
       await control.start(stream.id);
-      // Reset image state for fresh start
       handleManualImageRetry();
       await fetchStatus();
     } catch (e) {
@@ -251,13 +167,17 @@
     isLoading = true;
     try {
       await control.restart(stream.id);
-      // Reset image state for fresh start
       handleManualImageRetry();
+      streamEvents.clearTranscripts(stream.id);
       await fetchStatus();
     } catch (e) {
       console.error('Failed to restart stream:', e);
     }
     isLoading = false;
+  }
+  
+  function toggleStreamMode() {
+    streamMode = streamMode === 'webrtc' ? 'mjpeg' : 'webrtc';
   }
 </script>
 
@@ -285,12 +205,17 @@
         {:else if streamStatus?.fps}
           <span class="px-1.5 py-0.5 bg-[var(--color-bg-dark)] rounded">{Math.round(streamStatus.fps)} fps</span>
         {/if}
-        {#if isRunning && streamStatus?.ffmpeg_restarts > 1}
-          <span class="px-1.5 py-0.5 bg-[var(--color-warning)]/20 text-[var(--color-warning)] rounded" title="FFmpeg restarts">
-            R:{streamStatus.ffmpeg_restarts}
-          </span>
-        {/if}
       </div>
+      
+      <!-- Mode Toggle -->
+      <button 
+        onclick={toggleStreamMode}
+        class="text-[10px] px-1.5 py-0.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-bg-dark)] uppercase"
+        title="Switch between WebRTC (Fast) and MJPEG (Compatible)"
+      >
+        {streamMode === 'webrtc' ? 'RTC' : 'JPG'}
+      </button>
+
       <button
         onclick={() => onFocus(stream)}
         class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
@@ -308,79 +233,53 @@
     </div>
   </div>
 
-  <!-- Video with error handling -->
-  <div class="relative">
-    {#if showImage}
-      <!-- go2rtc MJPEG streaming - efficient, low CPU -->
-      <img
-        src="{go2rtc.mjpegUrl(stream.id)}?t={imageCacheBuster}"
-        alt={stream.name}
-        class="stream-video"
-        onerror={handleImageError}
-        onload={handleImageLoad}
+  <!-- Video Area -->
+  <div class="relative aspect-video bg-black">
+    {#if !isRunning}
+       <div class="absolute inset-0 flex items-center justify-center">
+          <div class="text-[var(--color-text-muted)] flex flex-col items-center">
+             <Icon name="stop" size={24} class="mb-2 opacity-50"/>
+             <span>Stream Stopped</span>
+          </div>
+       </div>
+    {:else if streamMode === 'webrtc'}
+      <!-- WebRTC Player -->
+      <WebRTCPlayer 
+        streamId={stream.id} 
+        onStatusChange={handleWebRTCStatus}
       />
     {:else}
-      <div class="stream-video flex items-center justify-center bg-black">
-        <div class="text-center p-4">
-          {#if displayState === 'connected' && (imageError || imageRetryCount >= MAX_IMAGE_RETRIES)}
-            <Icon name="alert-triangle" size={24} class="mx-auto mb-2 text-[var(--color-warning)]" />
-            <div class="text-[var(--color-warning)] text-sm">Stream error</div>
-            {#if imageRetryCount >= MAX_IMAGE_RETRIES}
-              <div class="text-[var(--color-text-muted)] text-xs mt-1">Max retries reached</div>
-              <button
-                onclick={handleManualImageRetry}
-                class="mt-2 px-3 py-1 text-xs bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
-              >
-                Retry
-              </button>
-            {:else}
-              <div class="text-[var(--color-text-muted)] text-xs mt-1">Retrying... ({imageRetryCount}/{MAX_IMAGE_RETRIES})</div>
-            {/if}
-          {:else if displayState === 'connecting'}
-            <div class="animate-pulse text-[var(--color-warning)]">Connecting...</div>
-          {:else if displayState === 'retrying'}
-            <Icon name="rotate" size={24} class="mx-auto mb-2 text-[var(--color-warning)] animate-spin" />
-            <div class="text-[var(--color-warning)] text-sm">Reconnecting</div>
-            <div class="text-[var(--color-text-muted)] text-xs mt-1">Attempt {retryCount}</div>
-          {:else if displayState === 'failed'}
-            <Icon name="x" size={32} class="mx-auto mb-2 text-[var(--color-danger)]" />
-            <div class="text-[var(--color-danger)] text-sm font-medium">Connection Failed</div>
-            <div class="text-[var(--color-text-muted)] text-xs mt-1 max-w-48">
-              {streamStatus?.error || 'Unable to connect after multiple attempts'}
-            </div>
-            <button
-              onclick={handleForceRetry}
-              disabled={isForceRetrying}
-              class="mt-3 px-3 py-1.5 text-xs bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors disabled:opacity-50"
-            >
-              {#if isForceRetrying}
-                <Icon name="rotate" size={14} class="inline animate-spin mr-1" />
-              {/if}
-              Retry Now
-            </button>
-          {:else if streamStatus?.error}
-            <div class="text-[var(--color-danger)] text-sm">{streamStatus.error}</div>
-          {:else}
-            <div class="text-[var(--color-text-muted)]">Stream stopped</div>
-          {/if}
+      <!-- Legacy MJPEG Player -->
+      {#if showImage}
+        <img
+          src="{go2rtc.mjpegUrl(stream.id)}?t={imageCacheBuster}"
+          alt={stream.name}
+          class="stream-video w-full h-full object-contain"
+          onerror={handleImageError}
+          onload={handleImageLoad}
+        />
+      {:else}
+        <!-- Loading / Error State for MJPEG -->
+        <div class="absolute inset-0 flex items-center justify-center">
+             {#if displayState === 'connecting'}
+                <div class="animate-pulse text-[var(--color-warning)]">Connecting MJPEG...</div>
+             {:else}
+                <div class="text-[var(--color-warning)] flex flex-col items-center">
+                    <Icon name="alert-triangle" size={24} class="mb-2"/>
+                    <span>MJPEG Error</span>
+                </div>
+             {/if}
         </div>
-      </div>
-    {/if}
-
-    <!-- SSE Error Banner -->
-    {#if sseError}
-      <div class="absolute bottom-0 left-0 right-0 bg-[var(--color-danger)]/90 text-white text-xs px-2 py-1">
-        {sseError}
-      </div>
+      {/if}
     {/if}
 
     <!-- Whisper indicator -->
     {#if stream.whisper_enabled}
-      <div class="absolute top-2 right-2">
+      <div class="absolute top-2 right-2 z-20 pointer-events-none">
         {#if hasWhisper}
-          <Icon name="volume" size={18} class="text-[var(--color-success)]" />
+          <Icon name="volume" size={18} class="text-[var(--color-success)] drop-shadow-md" />
         {:else}
-          <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)]" />
+          <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)] drop-shadow-md" />
         {/if}
       </div>
     {/if}

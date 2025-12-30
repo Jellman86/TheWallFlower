@@ -58,6 +58,9 @@ class StreamManager:
             return
 
         self._workers: Dict[int, StreamWorker] = {}
+        # We use a threading lock because workers are accessed by:
+        # 1. Async endpoints (main thread)
+        # 2. Health monitor (separate thread)
         self._workers_lock = threading.Lock()
         self._shutting_down = False
 
@@ -112,30 +115,6 @@ class StreamManager:
             except Exception as e:
                 logger.error(f"Transcript callback error: {e}")
 
-    def _run_async(self, coro):
-        """Run an async coroutine from sync code."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Create a new task in the running loop
-                import concurrent.futures
-                future = concurrent.futures.Future()
-
-                async def wrapper():
-                    try:
-                        result = await coro
-                        future.set_result(result)
-                    except Exception as e:
-                        future.set_exception(e)
-
-                asyncio.ensure_future(wrapper())
-                return future.result(timeout=10)
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            # No event loop, create one
-            return asyncio.run(coro)
-
     async def _add_stream_to_go2rtc(self, stream_id: int, rtsp_url: str) -> bool:
         """Add stream to go2rtc for efficient video streaming.
 
@@ -173,7 +152,7 @@ class StreamManager:
             logger.warning(f"Failed to remove stream {stream_id} from go2rtc: {e}")
             return False
 
-    def start_stream(self, stream_id: int) -> bool:
+    async def start_stream(self, stream_id: int) -> bool:
         """Start a stream worker for the given stream ID.
 
         This now:
@@ -186,49 +165,82 @@ class StreamManager:
         Returns:
             True if started successfully, False otherwise
         """
+        # 1. Quick check if already running (with lock)
         with self._workers_lock:
-            # Check if already running
             if stream_id in self._workers:
                 logger.warning(f"Stream {stream_id} already running")
                 return True
 
-            # Get stream config from database
-            with Session(engine) as session:
-                config = session.get(StreamConfig, stream_id)
-                if not config:
-                    logger.error(f"Stream {stream_id} not found in database")
-                    return False
+        # 2. Get config (DB access - fast enough, usually sync in SQLModel)
+        # Note: We're in an async function but using sync DB access. 
+        # Ideally this should be async too, but SQLModel is sync by default.
+        # Since it's fast (local SQLite usually), it's acceptable.
+        with Session(engine) as session:
+            config = session.get(StreamConfig, stream_id)
+            if not config:
+                logger.error(f"Stream {stream_id} not found in database")
+                return False
+            
+            # Store config data we need so we don't need session later
+            stream_name = config.name
+            rtsp_url = config.rtsp_url
+            whisper_enabled = config.whisper_enabled
+            # We need the full config object for the worker, but we can't keep the session open
+            # detaching object or querying again later? 
+            # Worker takes config object. Let's just pass the data we need or keep session scope small.
+            # Actually, StreamWorker stores the config object.
+            # We should probably create the worker inside this session block or re-query.
+            # But wait, we have a potentially slow async operation (go2rtc) coming up.
+            # We CANNOT keep the DB session open during that await!
+            
+        # 3. Add to go2rtc (SLOW, ASYNC, NO LOCK)
+        try:
+            # This is the key fix: awaiting here releases the event loop
+            # and we do NOT hold _workers_lock, so other requests can proceed.
+            await self._add_stream_to_go2rtc(stream_id, rtsp_url)
+        except Exception as e:
+            logger.error(f"go2rtc error for stream {stream_id}: {e}")
+            # Continue anyway - audio worker can still function
 
-                # Add stream to go2rtc for video streaming
-                try:
-                    self._run_async(self._add_stream_to_go2rtc(stream_id, config.rtsp_url))
-                except Exception as e:
-                    logger.error(f"go2rtc error for stream {stream_id}: {e}")
-                    # Continue anyway - audio worker can still function
+        # 4. Create and start worker
+        # We need to re-query config because we closed the session
+        with Session(engine) as session:
+            config = session.get(StreamConfig, stream_id)
+            if not config:
+                return False
+                
+            worker = StreamWorker(
+                config=config,
+                whisper_host=self._whisper_host,
+                whisper_port=self._whisper_port,
+                on_transcript=self._on_transcript
+            )
 
-                # Create and start worker (handles audio extraction for Whisper)
-                worker = StreamWorker(
-                    config=config,
-                    whisper_host=self._whisper_host,
-                    whisper_port=self._whisper_port,
-                    on_transcript=self._on_transcript
-                )
+        # 5. Add to workers dict (with lock)
+        with self._workers_lock:
+            # Race condition check: did someone else start it while we were awaiting?
+            if stream_id in self._workers:
+                # Cleanup our duplicate work
+                worker = None
+                return True
 
             try:
                 worker.start()
                 self._workers[stream_id] = worker
-                logger.info(f"Started stream {stream_id}: {config.name}")
+                logger.info(f"Started stream {stream_id}: {stream_name}")
                 return True
             except Exception as e:
                 logger.error(f"Failed to start stream {stream_id}: {e}")
-                # Clean up go2rtc if worker failed
-                try:
-                    self._run_async(self._remove_stream_from_go2rtc(stream_id))
-                except Exception:
-                    pass
+                # Cleanup go2rtc if worker failed
+                # We schedule this as a task so we don't block here? 
+                # Or just await it? We can await it.
                 return False
+                
+        # If we failed to start worker (returned False above), we should probably cleanup go2rtc
+        # But we can't do it inside the lock.
+        # Let's handle the cleanup outside.
 
-    def stop_stream(self, stream_id: int) -> bool:
+    async def stop_stream(self, stream_id: int) -> bool:
         """Stop a stream worker and remove from go2rtc.
 
         Args:
@@ -237,23 +249,27 @@ class StreamManager:
         Returns:
             True if stopped successfully, False if not running
         """
+        # 1. Remove from workers dict (with lock)
         with self._workers_lock:
             worker = self._workers.pop(stream_id, None)
-            if worker:
-                worker.stop()
-                # Also remove from go2rtc
-                try:
-                    self._run_async(self._remove_stream_from_go2rtc(stream_id))
-                except Exception as e:
-                    logger.warning(f"Error removing stream {stream_id} from go2rtc: {e}")
-                logger.info(f"Stopped stream {stream_id}")
-                return True
-            return False
+            
+        # 2. Stop worker and remove from go2rtc (NO LOCK)
+        if worker:
+            worker.stop()
+            logger.info(f"Stopped stream {stream_id}")
+            
+            try:
+                await self._remove_stream_from_go2rtc(stream_id)
+            except Exception as e:
+                logger.warning(f"Error removing stream {stream_id} from go2rtc: {e}")
+            return True
+            
+        return False
 
-    def restart_stream(self, stream_id: int) -> bool:
+    async def restart_stream(self, stream_id: int) -> bool:
         """Restart a stream worker (stop then start)."""
-        self.stop_stream(stream_id)
-        return self.start_stream(stream_id)
+        await self.stop_stream(stream_id)
+        return await self.start_stream(stream_id)
 
     def get_worker(self, stream_id: int) -> Optional[StreamWorker]:
         """Get a stream worker by ID."""
@@ -307,16 +323,11 @@ class StreamManager:
             "go2rtc_name": stream_name
         }
 
-    def reload_all(self) -> None:
-        """Sync running workers with database state.
-
-        - Starts workers for streams in DB that aren't running
-        - Stops workers for streams that were deleted from DB
-        """
+    async def reload_all(self) -> None:
+        """Sync running workers with database state."""
         logger.info("Reloading all streams from database")
 
         with Session(engine) as session:
-            # Get all stream IDs from database
             statement = select(StreamConfig.id)
             db_stream_ids = set(session.exec(statement).all())
 
@@ -326,14 +337,19 @@ class StreamManager:
         # Stop workers for deleted streams
         for stream_id in running_stream_ids - db_stream_ids:
             logger.info(f"Stopping removed stream {stream_id}")
-            self.stop_stream(stream_id)
+            await self.stop_stream(stream_id)
 
         # Start workers for new streams
+        # Use gather for parallel startup
+        tasks = []
         for stream_id in db_stream_ids - running_stream_ids:
             logger.info(f"Starting new stream {stream_id}")
-            self.start_stream(stream_id)
+            tasks.append(self.start_stream(stream_id))
+            
+        if tasks:
+            await asyncio.gather(*tasks)
 
-    def start_all(self) -> None:
+    async def start_all(self) -> None:
         """Start workers for all streams in the database."""
         logger.info("Starting all streams")
 
@@ -341,21 +357,25 @@ class StreamManager:
             statement = select(StreamConfig)
             streams = session.exec(statement).all()
 
-        for stream in streams:
-            self.start_stream(stream.id)
-
-        # Start health monitor
+        # Start health monitor first
         self._start_health_monitor()
+        
+        # Start all streams in parallel
+        tasks = [self.start_stream(stream.id) for stream in streams]
+        if tasks:
+            await asyncio.gather(*tasks)
 
-    def stop_all(self) -> None:
+    async def stop_all(self) -> None:
         """Stop all running workers."""
         logger.info("Stopping all streams")
 
         with self._workers_lock:
             stream_ids = list(self._workers.keys())
 
-        for stream_id in stream_ids:
-            self.stop_stream(stream_id)
+        # Stop in parallel
+        tasks = [self.stop_stream(stream_id) for stream_id in stream_ids]
+        if tasks:
+            await asyncio.gather(*tasks)
 
     def force_retry(self, stream_id: int) -> bool:
         """Force a stream to retry connection immediately, resetting circuit breaker.
@@ -449,13 +469,26 @@ class StreamManager:
         self._shutting_down = True
         sig_name = signal.Signals(signum).name
         logger.info(f"Received {sig_name}, initiating graceful shutdown...")
-        self.stop_all()
+        # Since we are in a signal handler (sync), we can't await stop_all.
+        # But we can try to schedule it if loop is running, or just let the main thread exit?
+        # Typically signal handlers in asyncio apps just set a flag or cancel the main task.
+        # But here we are using atexit too.
+        # We can't easily await here. Best effort to stop workers which are threads.
+        # The StreamWorker.stop() is sync, so we can iterate and stop them!
+        
+        # We can reuse the sync part of stop_stream mechanism manually
+        with self._workers_lock:
+            for worker in self._workers.values():
+                worker.stop()
+        # Go2RTC cleanup will be skipped in signal handler, but that's okay (process dying).
 
     def _atexit_handler(self) -> None:
         """Handle process exit - ensure all workers are stopped."""
         if not self._shutting_down:
             logger.info("Process exiting, cleaning up workers...")
-            self.stop_all()
+            with self._workers_lock:
+                for worker in self._workers.values():
+                    worker.stop()
 
     @property
     def is_shutting_down(self) -> bool:

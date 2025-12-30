@@ -1,6 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import { streams, healthCheck } from './lib/services/api.js';
+  import { streamEvents } from './lib/stores/streamEvents.svelte.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
   import StatsPanel from './lib/components/StatsPanel.svelte';
@@ -28,7 +29,12 @@
       untrack(() => {
         loadStreams();
         checkHealth();
+        streamEvents.connect();
       });
+
+      return () => {
+        streamEvents.disconnect();
+      };
     }
   });
 

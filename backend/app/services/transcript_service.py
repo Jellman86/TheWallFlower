@@ -1,6 +1,7 @@
 """Transcript persistence service for TheWallflower."""
 
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -13,13 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 class TranscriptService:
-    """Service for managing transcript persistence."""
+    """Service for managing transcript persistence.
+    
+    Thread-safe implementation for handling transcripts from multiple stream workers.
+    """
 
     def __init__(self):
         self._batch: List[TranscriptCreate] = []
         self._batch_size = 10  # Flush after this many transcripts
         self._last_flush = datetime.utcnow()
         self._flush_interval = timedelta(seconds=5)  # Flush at least every 5 seconds
+        self._lock = threading.Lock()
 
     def add(self, transcript: TranscriptCreate) -> None:
         """Add a transcript to the batch for persistence.
@@ -27,11 +32,21 @@ class TranscriptService:
         Transcripts are batched to reduce database writes.
         Call flush() to force immediate persistence.
         """
-        self._batch.append(transcript)
+        should_flush = False
+        
+        with self._lock:
+            self._batch.append(transcript)
 
-        # Auto-flush if batch is full or interval exceeded
-        if (len(self._batch) >= self._batch_size or
-            datetime.utcnow() - self._last_flush > self._flush_interval):
+            # Check flush conditions within lock
+            if (len(self._batch) >= self._batch_size or
+                datetime.utcnow() - self._last_flush > self._flush_interval):
+                should_flush = True
+        
+        # Flush outside the add lock (flush acquires lock again)
+        # Note: Optimization - flush() handles its own locking, but we could optimise
+        # to hold lock throughout. However, DB write inside lock might block other adds.
+        # Better to let add() be fast.
+        if should_flush:
             self.flush()
 
     def flush(self) -> int:
@@ -40,12 +55,18 @@ class TranscriptService:
         Returns:
             Number of transcripts saved.
         """
-        if not self._batch:
-            return 0
+        batch_to_save = []
+        
+        with self._lock:
+            if not self._batch:
+                return 0
+            
+            batch_to_save = self._batch
+            self._batch = []
+            self._last_flush = datetime.utcnow()
 
-        batch_to_save = self._batch
-        self._batch = []
-        self._last_flush = datetime.utcnow()
+        if not batch_to_save:
+            return 0
 
         try:
             with Session(engine) as session:
@@ -66,7 +87,8 @@ class TranscriptService:
         except Exception as e:
             logger.error(f"Failed to flush transcripts: {e}")
             # Put failed transcripts back in batch for retry
-            self._batch = batch_to_save + self._batch
+            with self._lock:
+                self._batch = batch_to_save + self._batch
             return 0
 
     def get_by_stream(

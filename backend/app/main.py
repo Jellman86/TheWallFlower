@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import os
 
-# Added Request/Response imports to fix NameErrors in proxy endpoints
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,13 +23,14 @@ from app.models import (
     StreamConfigCreate,
     StreamConfigUpdate,
     StreamConfigRead,
+    Transcript,
+    TranscriptRead
 )
 from app.stream_manager import stream_manager
 from app.worker import StreamStatus, ConnectionState, CircuitBreakerState
 from app.stream_validator import StreamValidator, StreamMetadata, StreamErrorType
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
-from app.models import Transcript, TranscriptRead
 from app.routers import debug as debug_router
 
 # Configure logging
@@ -46,14 +47,14 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
-    # Start all configured streams
-    stream_manager.start_all()
+    # Start all configured streams (now async)
+    await stream_manager.start_all()
     logger.info("Stream manager started")
 
     yield
 
-    # Stop all streams on shutdown
-    stream_manager.stop_all()
+    # Stop all streams on shutdown (now async)
+    await stream_manager.stop_all()
     logger.info("Stream manager stopped")
 
 
@@ -65,9 +66,6 @@ app = FastAPI(
 )
 
 # CORS middleware
-# FIX: Use environment variable for origins or default to specific ports for security
-# Replaced wildcards with controlled list to prevent arbitrary access
-import os
 origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8080").split(",")
 
 app.add_middleware(
@@ -87,7 +85,7 @@ app.include_router(debug_router.router)
 # =============================================================================
 
 @app.post("/api/streams", response_model=StreamConfigRead, status_code=201)
-def create_stream(
+async def create_stream(
     stream: StreamConfigCreate,
     session: Session = Depends(get_session)
 ) -> StreamConfig:
@@ -97,8 +95,8 @@ def create_stream(
     session.commit()
     session.refresh(db_stream)
 
-    # Auto-start the new stream
-    stream_manager.start_stream(db_stream.id)
+    # Auto-start the new stream (async)
+    await stream_manager.start_stream(db_stream.id)
 
     return db_stream
 
@@ -126,7 +124,7 @@ def get_stream(
 
 
 @app.patch("/api/streams/{stream_id}", response_model=StreamConfigRead)
-def update_stream(
+async def update_stream(
     stream_id: int,
     stream_update: StreamConfigUpdate,
     session: Session = Depends(get_session)
@@ -151,15 +149,15 @@ def update_stream(
     session.commit()
     session.refresh(stream)
 
-    # Restart worker if configuration changed
+    # Restart worker if configuration changed (async)
     if needs_restart:
-        stream_manager.restart_stream(stream_id)
+        await stream_manager.restart_stream(stream_id)
 
     return stream
 
 
 @app.delete("/api/streams/{stream_id}", status_code=204)
-def delete_stream(
+async def delete_stream(
     stream_id: int,
     session: Session = Depends(get_session)
 ) -> None:
@@ -168,8 +166,8 @@ def delete_stream(
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
 
-    # Stop the worker first
-    stream_manager.stop_stream(stream_id)
+    # Stop the worker first (async)
+    await stream_manager.stop_stream(stream_id)
 
     session.delete(stream)
     session.commit()
@@ -180,13 +178,13 @@ def delete_stream(
 # =============================================================================
 
 @app.post("/api/streams/{stream_id}/start")
-def start_stream(stream_id: int, session: Session = Depends(get_session)):
+async def start_stream(stream_id: int, session: Session = Depends(get_session)):
     """Start a stream worker."""
     stream = session.get(StreamConfig, stream_id)
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
 
-    success = stream_manager.start_stream(stream_id)
+    success = await stream_manager.start_stream(stream_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to start stream")
 
@@ -194,24 +192,24 @@ def start_stream(stream_id: int, session: Session = Depends(get_session)):
 
 
 @app.post("/api/streams/{stream_id}/stop")
-def stop_stream(stream_id: int, session: Session = Depends(get_session)):
+async def stop_stream(stream_id: int, session: Session = Depends(get_session)):
     """Stop a stream worker."""
     stream = session.get(StreamConfig, stream_id)
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
 
-    stream_manager.stop_stream(stream_id)
+    await stream_manager.stop_stream(stream_id)
     return {"status": "stopped", "stream_id": stream_id}
 
 
 @app.post("/api/streams/{stream_id}/restart")
-def restart_stream(stream_id: int, session: Session = Depends(get_session)):
+async def restart_stream(stream_id: int, session: Session = Depends(get_session)):
     """Restart a stream worker."""
     stream = session.get(StreamConfig, stream_id)
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
 
-    success = stream_manager.restart_stream(stream_id)
+    success = await stream_manager.restart_stream(stream_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to restart stream")
 
@@ -786,7 +784,7 @@ def export_transcripts(
 
             lines.append(str(i))
             lines.append(
-                f"{start_h[0]:02d}:{start_m[0]:02d}:{start_s:06.3f}".replace(".", ",") +
+                f"{start_h[0]:02d}:{start_m[0]:02d}:{start_s:06.3f}".replace(".", ",") + 
                 " --> " +
                 f"{end_h[0]:02d}:{end_m[0]:02d}:{end_s:06.3f}".replace(".", ",")
             )
