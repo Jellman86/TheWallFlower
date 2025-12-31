@@ -344,16 +344,14 @@ class StreamWorker:
 
         audio_source = self._get_audio_source_url()
 
-        # FFmpeg command: Extracts audio from go2rtc RTSP restream
-        # Simplified filters and increased volume to ensure WhisperLive 'hears' anything
+        # Simplest possible FFmpeg command to avoid numerical errors
         ffmpeg_cmd = [
             "ffmpeg",
-            "-loglevel", "warning",
+            "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "volume=2.5",
-            "-c:a", "pcm_s16le",
+            "-acodec", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
             "-f", "s16le",
@@ -361,69 +359,54 @@ class StreamWorker:
         ]
 
         ffmpeg_process = None
-        stderr_thread = None
-
         try:
             async with websockets.connect(whisper_url) as ws:
                 self._status.whisper_connected = True
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Send initial configuration message (Essential for WhisperLive protocol)
+                # Comprehensive handshake matching official client
                 config_msg = {
-                    "uid": f"stream_{self.config.id}",
+                    "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
+                    "lang": "en", # Dual keys for compatibility
                     "task": "transcribe",
-                    "model": "base.en", 
-                    "use_vad": False # DISABLED FOR DEBUGGING
+                    "model": "base", # Use standard size name
+                    "use_vad": False, # Keep off for debugging
+                    "translate": False
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id} (VAD: False)")
+                logger.info(f"Handshake sent for stream {self.config.id}: {config_msg['uid']}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=10**6
+                    stderr=subprocess.PIPE
                 )
                 self._ffmpeg_process = ffmpeg_process
                 self._status.audio_connected = True
-                self._status.ffmpeg_restarts += 1
                 self._emit_status_event()
 
-                stderr_thread = threading.Thread(
-                    target=self._read_ffmpeg_stderr,
-                    args=(ffmpeg_process,),
-                    name=f"ffmpeg-stderr-{self.config.id}",
-                    daemon=True
-                )
-                stderr_thread.start()
+                send_task = asyncio.create_task(self._send_audio(ws, ffmpeg_process))
+                recv_task = asyncio.create_task(self._receive_transcripts(ws))
 
-                send_task = asyncio.create_task(
-                    self._send_audio(ws, ffmpeg_process)
-                )
-                recv_task = asyncio.create_task(
-                    self._receive_transcripts(ws)
-                )
-
+                # Track which task ends first
                 done, pending = await asyncio.wait(
                     [send_task, recv_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
+                
+                for task in done:
+                    if task == send_task:
+                        logger.warning(f"Audio sender ended first for stream {self.config.id}")
+                    else:
+                        logger.warning(f"Transcript receiver ended first for stream {self.config.id}")
 
                 for task in pending:
                     task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
 
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning(f"WhisperLive connection closed for stream {self.config.id}")
-        except ConnectionRefusedError:
-            logger.warning(f"WhisperLive connection refused for stream {self.config.id}")
         except Exception as e:
-            logger.error(f"WhisperLive error for stream {self.config.id}: {e}")
+            logger.error(f"WhisperLive connection error for stream {self.config.id}: {e}")
         finally:
             self._status.whisper_connected = False
             self._status.audio_connected = False
@@ -433,35 +416,36 @@ class StreamWorker:
                 self._cleanup_ffmpeg(ffmpeg_process)
 
     async def _send_audio(self, ws, ffmpeg_process: subprocess.Popen) -> None:
-        """Send audio chunks to WhisperLive."""
-        chunk_size = 4096
+        """Send audio chunks to WhisperLive with diagnostic sampling."""
+        chunk_size = 8192 # Larger chunks for stability
+        chunks_sent = 0
 
         while not self._stop_event.is_set():
             if ffmpeg_process.poll() is not None:
-                logger.warning(f"FFmpeg process ended for stream {self.config.id}")
                 break
 
-            # Use asyncio.to_thread for the blocking read to avoid freezing the event loop
             try:
                 audio_chunk = await asyncio.to_thread(ffmpeg_process.stdout.read, chunk_size)
-            except Exception as e:
-                logger.error(f"FFmpeg read error for stream {self.config.id}: {e}")
-                break
+                if not audio_chunk:
+                    break
 
-            if not audio_chunk:
-                logger.warning(f"FFmpeg stdout EOF for stream {self.config.id}")
-                break
+                # Diagnostic: Log audio stats every 100 chunks (~50 seconds)
+                chunks_sent += 1
+                if chunks_sent % 100 == 1:
+                    import numpy as np
+                    samples = np.frombuffer(audio_chunk, dtype=np.int16)
+                    max_val = np.max(np.abs(samples)) if len(samples) > 0 else 0
+                    logger.info(f"Stream {self.config.id} Audio Probe: Chunk={chunks_sent}, Max Amplitude={max_val}")
 
-            with self._status_lock:
-                self._status.last_audio_time = datetime.now()
-
-            try:
                 await ws.send(audio_chunk)
+                
+                with self._status_lock:
+                    self._status.last_audio_time = datetime.now()
+
             except Exception as e:
-                logger.error(f"Error sending audio for stream {self.config.id}: {e}")
+                logger.error(f"Send audio error: {e}")
                 break
 
-            # Small sleep to yield control
             await asyncio.sleep(0.01)
 
     async def _receive_transcripts(self, ws) -> None:
