@@ -445,11 +445,7 @@ class StreamWorker:
                 self._status.last_audio_time = datetime.now()
 
             try:
-                if ws.open:
-                    await ws.send(audio_chunk)
-                else:
-                    logger.warning(f"Websocket closed for stream {self.config.id}")
-                    break
+                await ws.send(audio_chunk)
             except Exception as e:
                 logger.error(f"Error sending audio for stream {self.config.id}: {e}")
                 break
