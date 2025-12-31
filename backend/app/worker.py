@@ -131,6 +131,7 @@ class StreamWorker:
         # Track set of (start_time, text) for is_final segments to avoid re-processing
         self._finalized_segment_ids = set()
         self._recent_final_texts = [] # Sliding window of last unique texts
+        self._last_emitted_interim_text = "" # Track last interim update to prevent redundant events
 
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0

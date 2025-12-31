@@ -14,6 +14,7 @@ import atexit
 import logging
 import signal
 import threading
+import time
 from typing import Dict, List, Optional, Callable
 from datetime import datetime, timedelta
 
@@ -293,25 +294,15 @@ class StreamManager:
         if tasks:
             await asyncio.gather(*tasks)
 
-        async def start_all(self) -> None:
+    async def start_all(self) -> None:
+        logger.info("Starting all streams")
+        with Session(engine) as session:
+            statement = select(StreamConfig)
+            streams = session.exec(statement).all()
 
-            logger.info("Starting all streams")
-
-            with Session(engine) as session:
-
-                statement = select(StreamConfig)
-
-                streams = session.exec(statement).all()
-
-    
-
-            self.start_background_tasks()
-
-            
-
-            tasks = [self.start_stream(stream.id) for stream in streams]
-
-    
+        self.start_background_tasks()
+        
+        tasks = [self.start_stream(stream.id) for stream in streams]
         if tasks:
             await asyncio.gather(*tasks)
 
