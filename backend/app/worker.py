@@ -338,6 +338,8 @@ class StreamWorker:
         whisper_url = f"ws://{self.whisper_host}:{self.whisper_port}"
         logger.info(f"Connecting to WhisperLive at {whisper_url}")
 
+        audio_source = self._get_audio_source_url()
+
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
         ffmpeg_cmd = [
             "ffmpeg",
