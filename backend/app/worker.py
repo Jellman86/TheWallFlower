@@ -341,14 +341,10 @@ class StreamWorker:
         audio_source = self._get_audio_source_url()
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
-        # Added reconnect flags for robustness
+        # Note: -reconnect is not supported for RTSP demuxer in this version
         ffmpeg_cmd = [
             "ffmpeg",
-            "-loglevel", "info",
-            "-reconnect", "1",
-            "-reconnect_at_eof", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
+            "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
@@ -374,10 +370,10 @@ class StreamWorker:
                     "language": "en",
                     "task": "transcribe",
                     "model": "base.en", 
-                    "use_vad": False # Disable VAD for testing to see if we get ANY output
+                    "use_vad": True
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id} (VAD disabled)")
+                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
