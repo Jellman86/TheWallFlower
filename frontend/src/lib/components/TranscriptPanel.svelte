@@ -38,7 +38,7 @@
     const url = `${API_BASE}/streams/${streamId}/events`;
     eventSource = new EventSource(url);
 
-    event_source.addEventListener('transcript', (event) => {
+    eventSource.addEventListener('transcript', (event) => {
       try {
         const data = JSON.parse(event.data);
         const transcript = data.data;

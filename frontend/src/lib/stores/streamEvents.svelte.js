@@ -42,12 +42,26 @@ function createStreamStore() {
     eventSource.addEventListener('transcript', (event) => {
       try {
         const payload = JSON.parse(event.data);
-        const { stream_id, data } = payload;
+        const { stream_id, data: transcript } = payload;
         
         if (stream_id) {
           const currentTranscripts = streamTranscripts[stream_id] || [];
-          // Add to front (newest first) and limit to 10
-          const updatedTranscripts = [data, ...currentTranscripts].slice(0, 10);
+          
+          // Find if we already have this segment by ID (preferred) or start time
+          const existingIndex = currentTranscripts.findIndex(t => 
+            (transcript.id && t.id === transcript.id) || 
+            Math.abs(t.start_time - transcript.start_time) < 0.1
+          );
+
+          let updatedTranscripts;
+          if (existingIndex !== -1) {
+            // Update existing segment
+            updatedTranscripts = [...currentTranscripts];
+            updatedTranscripts[existingIndex] = { ...updatedTranscripts[existingIndex], ...transcript };
+          } else {
+            // New segment, add to front and enforce limit
+            updatedTranscripts = [transcript, ...currentTranscripts].slice(0, 50);
+          }
           
           // Replace object to trigger reactivity
           streamTranscripts = { ...streamTranscripts, [stream_id]: updatedTranscripts };

@@ -480,7 +480,14 @@ class StreamWorker:
 
                 for seg_data in segments_to_process:
                     text = seg_data.get("text", "").strip()
-                    if not text:
+                    
+                    # Hallucination Filter: Ignore empty, single-char, or common junk noise
+                    if not text or len(text) < 2:
+                        continue
+                        
+                    # Ignore 'Thank you.' or 'I'm sorry.' if they are the very first 
+                    # thing heard and very short, as they are common Whisper artifacts
+                    if text.lower() in ["thank you.", "i'm sorry.", "thanks for watching.", "subtitle by"] and not is_final:
                         continue
                         
                     start_time = float(seg_data.get("start", 0.0))
@@ -544,7 +551,7 @@ class StreamWorker:
                         self.on_transcript(self.config.id, segment)
 
                     event_broadcaster.emit_transcript(self.config.id, {
-                        "id": f"{start_time:.2f}",
+                        "id": f"{round(start_time * 2) / 2:.1f}",
                         "text": segment.text,
                         "start_time": segment.start_time,
                         "end_time": segment.end_time,
