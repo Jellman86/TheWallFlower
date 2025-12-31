@@ -92,7 +92,6 @@ When a user views a stream, this sequence happens:
 
 ## Operational Constraints
 
-*   **Docker Access:** You do NOT have access to the Docker daemon. Do not run `docker` commands (ps, logs, restart).
 *   **Connectivity:** `localhost` refers to your local agent environment, NOT the application container. You cannot connect to the app via `localhost`.
 *   **Testing:** Use Docker DNS names to interact with the API (e.g., `http://thewallflower:8953`).
 *   **Modifying Files:** Always use `read_file` before `replace`. Context is key.
@@ -107,3 +106,64 @@ When a user views a stream, this sequence happens:
     *   Log Level: `debug`.
 *   **Frontend:** `WebRTCPlayer` has 3s ICE timeout.
 *   **Backend:** Enhanced logging on all proxy endpoints.
+
+# AI ASSISTANT GROUNDING FILE & OPERATIONAL CONTEXT
+
+## 1. SYSTEM IDENTITY & ENVIRONMENT
+You are operating inside a specialized **Dev Container** based on the `linuxserver/code-server` image.
+* **OS:** Ubuntu 24.04 LTS (Noble Numbat).
+* **Architecture:** Linux x86_64 (amd64).
+* **Locale:** UK English (`en_GB.UTF-8`).
+* **Shell:** Bash (default) and PowerShell (`pwsh`) are available.
+* **User Context:** You are likely acting as user `abc` (or `root`). The user `abc` has access to the Docker socket via the group `docker-sock`.
+
+## 2. CRITICAL PATHS & PERSISTENCE
+**WARNING:** This is an ephemeral container. Files created outside of mapped volumes will disappear if the container is recreated.
+
+* **Persistent Workspace:** `/config/workspace`. *Always verify the current working directory.*
+* **Persistent Config:** `/config`
+* **Ephemeral System:** `/usr`, `/lib`, `/etc` are reset on container rebuild.
+* **Global NPM:** `/opt/npm-global` (Built-in path).
+
+## 3. INSTALLED TOOLCHAIN
+
+### Core Runtimes
+* **Node.js:** v22.x (npm available).
+* **Python:** Python 3.x (with `pip`, `venv`).
+* **PowerShell:** Installed as `pwsh`.
+
+### Docker (Sibling Mode)
+* **Status:** Host Docker Socket mounted at `/var/run/docker.sock`.
+* **Tools:** `docker-ce-cli`, `docker-buildx-plugin`, `docker-compose-plugin`.
+* **CRITICAL CONSTRAINT:** **Only action docker commands on the developed containers (e.g., The Wallflower containers, YA-WAMF containers). Do NOT modify host system containers or this development container itself.**
+
+### AI & CLI Tools
+* **Location:** `/opt/npm-global/bin` (Added to PATH).
+* **Tools:**
+    *   `@anthropic-ai/claude-code`
+    *   `@google/gemini-cli`
+    *   `@openai/codex`
+*   **Auto-Update:** Tools are auto-updated on container boot via `/custom-cont-init.d`.
+
+### Networking & Utilities
+* **Tools:** `ping`, `nc` (netcat-openbsd), `dig`/`nslookup` (dnsutils), `ifconfig`/`netstat` (net-tools), `traceroute`, `curl`, `wget`, `jq`, `ripgrep` (`rg`), `ffmpeg`.
+
+## 4. OPERATIONAL RULES & DIRECTIVES
+
+### 1. Package Installation Strategy
+* **Project Dependencies:** Always prefer local installation (`npm install`, `pip install`) within the persistent workspace.
+* **System Tools:** If a system tool is missing, warn the user it will vanish on rebuild, or suggest adding it to the `Dockerfile`.
+
+### 2. Docker Operations
+* **Targeting:** Strictly limit Docker commands to the project containers.
+* **Networking:** Use container names for inter-container communication. Do not assume `localhost` works for sibling containers.
+
+### 3. File Editing
+* Use standard file I/O.
+* Respect `.gitignore`.
+* Be aware `/config` is volume-mounted.
+
+## 5. TROUBLESHOOTING CHEATSHEET
+* **"Docker Permission Denied":** Remind user to restart container if they just added the socket volume. The `10-setup-env` script fixes permissions on boot.
+* **"Command Not Found":** Check `$PATH`. The custom NPM path `/opt/npm-global/bin` should be there.
+* **Network Issues:** Use `nc -zv <host> <port>` to verify connectivity before assuming code is broken.
