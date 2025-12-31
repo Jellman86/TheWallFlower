@@ -24,6 +24,9 @@ services:
       - GO2RTC_PORT=8954
       - GO2RTC_RTSP_PORT=8955
       - GO2RTC_WEBRTC_PORT=8956
+      # WebRTC Candidates: Add your Host IP or Domain here to fix ICE failures
+      # e.g., "192.168.1.50:8555" or "stun:8555" (mapped port)
+      - WEBRTC_CANDIDATES=${WEBRTC_CANDIDATES}
     depends_on:
       - whisper-live
     restart: unless-stopped

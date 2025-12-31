@@ -121,6 +121,14 @@ python -c "from app.db import init_db; init_db()" 2>/dev/null || {
 
 # Create/Overwrite go2rtc config (Always overwrite to ensure validity)
 log_info "Generating go2rtc configuration..."
+
+# Build candidates list if provided
+CANDIDATES_YAML=""
+if [ -n "$WEBRTC_CANDIDATES" ]; then
+    log_info "Adding WebRTC candidates: $WEBRTC_CANDIDATES"
+    CANDIDATES_YAML="    - \"$WEBRTC_CANDIDATES\""
+fi
+
 cat > "$GO2RTC_CONFIG_PATH" << EOYAML
 # go2rtc configuration for TheWallflower
 api:
@@ -137,6 +145,8 @@ webrtc:
   listen: ":${GO2RTC_WEBRTC_PORT}"
   ice_servers:
     - urls: [ "stun:stun.l.google.com:19302" ]
+  candidates:
+$CANDIDATES_YAML
 
 log:
   level: debug
