@@ -31,7 +31,8 @@ function createStreamStore() {
         const payload = JSON.parse(event.data);
         const { stream_id, data } = payload;
         if (stream_id) {
-          streamStatuses[stream_id] = data;
+          // Replace object to ensure Object.values() reactivity in derivations
+          streamStatuses = { ...streamStatuses, [stream_id]: data };
         }
       } catch (e) {
         console.error('Failed to parse status event:', e);
@@ -44,12 +45,12 @@ function createStreamStore() {
         const { stream_id, data } = payload;
         
         if (stream_id) {
-          // Initialize array if needed
-          if (!streamTranscripts[stream_id]) {
-            streamTranscripts[stream_id] = [];
-          }
+          const currentTranscripts = streamTranscripts[stream_id] || [];
           // Add to front (newest first) and limit to 10
-          streamTranscripts[stream_id] = [data, ...streamTranscripts[stream_id]].slice(0, 10);
+          const updatedTranscripts = [data, ...currentTranscripts].slice(0, 10);
+          
+          // Replace object to trigger reactivity
+          streamTranscripts = { ...streamTranscripts, [stream_id]: updatedTranscripts };
         }
       } catch (e) {
         console.error('Failed to parse transcript event:', e);
@@ -80,12 +81,13 @@ function createStreamStore() {
   // Method to clear transcripts for a stream (e.g. on restart)
   function clearTranscripts(streamId) {
     if (streamTranscripts[streamId]) {
-      streamTranscripts[streamId] = [];
+      streamTranscripts = { ...streamTranscripts, [streamId]: [] };
     }
   }
 
   return {
     get connectionStatus() { return connectionStatus; },
+    get allStatuses() { return streamStatuses; },
     getStreamStatus: (id) => streamStatuses[id],
     getTranscripts: (id) => streamTranscripts[id] || [],
     connect,

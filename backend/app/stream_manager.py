@@ -75,6 +75,7 @@ class StreamManager:
 
         self._transcript_callbacks: List[Callable[[int, TranscriptSegment], None]] = []
         self._health_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: Optional[threading.Thread] = None
         self._health_check_interval = HEALTH_CHECK_INTERVAL
 
         atexit.register(self._atexit_handler)
@@ -86,6 +87,46 @@ class StreamManager:
             f"StreamManager initialized (Whisper: {self._whisper_host}:{self._whisper_port}, "
             f"go2rtc: {settings.go2rtc_host}:{settings.go2rtc_port})"
         )
+
+    def start_background_tasks(self) -> None:
+        """Start periodic maintenance and health monitoring tasks."""
+        if not self._health_thread:
+            self._health_thread = threading.Thread(
+                target=self._health_monitor_loop,
+                name="stream-health-monitor",
+                daemon=True
+            )
+            self._health_thread.start()
+            logger.info("Health monitor started")
+
+        if not self._cleanup_thread:
+            self._cleanup_thread = threading.Thread(
+                target=self._cleanup_loop,
+                name="transcript-cleanup",
+                daemon=True
+            )
+            self._cleanup_thread.start()
+            logger.info("Cleanup monitor started")
+
+    def _cleanup_loop(self) -> None:
+        """Periodically purge old records from database."""
+        from app.services.transcript_service import transcript_service
+        
+        # Initial wait to let system settle
+        time.sleep(60)
+        
+        while not self._shutting_down:
+            try:
+                # Cleanup transcripts older than 7 days or more than 5000 per stream
+                transcript_service.cleanup_old(max_age_days=7, max_per_stream=5000)
+            except Exception as e:
+                logger.error(f"Transcript cleanup error: {e}")
+
+            # Sleep for 12 hours
+            for _ in range(12 * 60 * 6): # 12 hours in 10s increments
+                if self._shutting_down:
+                    break
+                time.sleep(10)
 
     def register_transcript_callback(
         self, callback: Callable[[int, TranscriptSegment], None]
@@ -252,16 +293,25 @@ class StreamManager:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def start_all(self) -> None:
-        logger.info("Starting all streams")
+        async def start_all(self) -> None:
 
-        with Session(engine) as session:
-            statement = select(StreamConfig)
-            streams = session.exec(statement).all()
+            logger.info("Starting all streams")
 
-        self._start_health_monitor()
-        
-        tasks = [self.start_stream(stream.id) for stream in streams]
+            with Session(engine) as session:
+
+                statement = select(StreamConfig)
+
+                streams = session.exec(statement).all()
+
+    
+
+            self.start_background_tasks()
+
+            
+
+            tasks = [self.start_stream(stream.id) for stream in streams]
+
+    
         if tasks:
             await asyncio.gather(*tasks)
 
@@ -291,18 +341,6 @@ class StreamManager:
 
             logger.info(f"Stream {stream_id}: Force retry requested, circuit breaker reset")
             return True
-
-    def _start_health_monitor(self) -> None:
-        if self._health_thread and self._health_thread.is_alive():
-            return
-
-        self._health_thread = threading.Thread(
-            target=self._health_monitor_loop,
-            name="stream-health-monitor",
-            daemon=True
-        )
-        self._health_thread.start()
-        logger.info("Health monitor started")
 
     def _health_monitor_loop(self) -> None:
         import time

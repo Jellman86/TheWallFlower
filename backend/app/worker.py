@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict
 import json
 
 import websockets
@@ -127,7 +127,10 @@ class StreamWorker:
         # Transcript buffer and deduplication
         self._transcript_segments: List[TranscriptSegment] = []
         self._transcript_lock = threading.Lock()
-        self._processed_segment_ids = set() # Track (start_time, text) for is_final segments
+        
+        # Track set of (start_time, text) for is_final segments to avoid re-processing
+        self._finalized_segment_ids = set()
+        self._recent_final_texts = [] # Sliding window of last unique texts
 
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0
@@ -164,7 +167,7 @@ class StreamWorker:
     def _emit_status_event(self) -> None:
         """Emit current status via SSE."""
         status = self.status # Access via property to ensure lock usage
-        event_broadcaster.emit_status(self.config.id, {
+        payload = {
             "is_running": status.is_running,
             "video_connected": status.video_connected,
             "audio_connected": status.audio_connected,
@@ -178,7 +181,9 @@ class StreamWorker:
             "connection_state": status.connection_state.value,
             "retry_count": status.retry_count,
             "next_retry_time": status.next_retry_time.isoformat() if status.next_retry_time else None,
-        })
+        }
+        logger.info(f"Emitting status update for stream {self.config.id}: {payload}")
+        event_broadcaster.emit_status(self.config.id, payload)
 
     @property
     def status(self) -> StreamStatus:
@@ -462,7 +467,7 @@ class StreamWorker:
                 message = await asyncio.wait_for(ws.recv(), timeout=1.0)
                 data = json.loads(message)
                 
-                logger.info(f"Received from WhisperLive for stream {self.config.id}: {data}")
+                logger.debug(f"Received from WhisperLive for stream {self.config.id}: {data}")
 
                 segments_to_process = []
                 if "text" in data:
@@ -478,15 +483,32 @@ class StreamWorker:
                     start_time = float(seg_data.get("start", 0.0))
                     is_final = seg_data.get("is_final", seg_data.get("completed", False))
                     
-                    # Deduplication: Only process 'final' segments once
+                    # Robust Deduplication
                     if is_final:
-                        segment_id = f"{start_time:.2f}_{text}"
-                        if segment_id in self._processed_segment_ids:
+                        # 1. Round timestamp to 0.1s to handle micro-shifts
+                        final_id = f"{start_time:.1f}_{text}"
+                        if final_id in self._finalized_segment_ids:
                             continue
-                        self._processed_segment_ids.add(segment_id)
-                        # Keep memory usage in check
-                        if len(self._processed_segment_ids) > 1000:
-                            self._processed_segment_ids.clear() 
+                        
+                        # 2. Catch rapid identical repeats
+                        if text in self._recent_final_texts:
+                            continue
+                            
+                        self._finalized_segment_ids.add(final_id)
+                        self._recent_final_texts.append(text)
+                        
+                        # Keep collections small
+                        if len(self._finalized_segment_ids) > 1000:
+                            self._finalized_segment_ids.clear()
+                        if len(self._recent_final_texts) > 20:
+                            self._recent_final_texts.pop(0)
+                            
+                        self._last_emitted_interim_text = "" # Reset on final
+                    else:
+                        # Skip if interim text is identical to last one
+                        if text == self._last_emitted_interim_text:
+                            continue
+                        self._last_emitted_interim_text = text
 
                     segment = TranscriptSegment(
                         text=text,
@@ -503,6 +525,7 @@ class StreamWorker:
                     self._status.last_transcript = segment.text
 
                     if segment.is_final:
+                        logger.info(f"New final transcript for stream {self.config.id}: {text}")
                         transcript_service.add(TranscriptCreate(
                             stream_id=self.config.id,
                             text=segment.text,
@@ -518,6 +541,7 @@ class StreamWorker:
                         self.on_transcript(self.config.id, segment)
 
                     event_broadcaster.emit_transcript(self.config.id, {
+                        "id": f"{start_time:.2f}_{text[:20]}",
                         "text": segment.text,
                         "start_time": segment.start_time,
                         "end_time": segment.end_time,

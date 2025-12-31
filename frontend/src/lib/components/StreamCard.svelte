@@ -343,12 +343,21 @@
       {/if}
     </div>
     {#if stream.whisper_enabled}
-      <button
-        onclick={() => showTranscripts = !showTranscripts}
-        class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      >
-        {showTranscripts ? 'Hide' : 'Show'} transcripts
-      </button>
+      <div class="flex gap-3">
+        <button
+          onclick={() => streamEvents.clearTranscripts(stream.id)}
+          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors"
+          title="Clear local transcript history"
+        >
+          Clear
+        </button>
+        <button
+          onclick={() => showTranscripts = !showTranscripts}
+          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        >
+          {showTranscripts ? 'Hide' : 'Show'} transcripts
+        </button>
+      </div>
     {/if}
   </div>
 </div>

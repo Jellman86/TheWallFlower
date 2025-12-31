@@ -38,12 +38,24 @@
     const url = `${API_BASE}/streams/${streamId}/events`;
     eventSource = new EventSource(url);
 
-    eventSource.addEventListener('transcript', (event) => {
+    event_source.addEventListener('transcript', (event) => {
       try {
         const data = JSON.parse(event.data);
         const transcript = data.data;
-        // Add to front (newest first)
-        transcriptList = [transcript, ...transcriptList.slice(0, 99)];
+        
+        // Find if we already have this segment by ID (preferred) or start time
+        const existingIndex = transcriptList.findIndex(t => 
+          (transcript.id && t.id === transcript.id) || 
+          Math.abs(t.start_time - transcript.start_time) < 0.1
+        );
+
+        if (existingIndex !== -1) {
+          // Update existing segment
+          transcriptList[existingIndex] = { ...transcriptList[existingIndex], ...transcript };
+        } else {
+          // New segment, add to front and enforce limit
+          transcriptList = [transcript, ...transcriptList].slice(0, 100);
+        }
       } catch (e) {
         console.error('Failed to parse transcript:', e);
       }
@@ -113,6 +125,14 @@
           </button>
         {/if}
       </div>
+      <!-- Clear -->
+      <button
+        onclick={() => { transcriptList = []; }}
+        class="p-1 hover:bg-[var(--color-bg-hover)] rounded transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+        title="Clear transcripts"
+      >
+        <Icon name="stop" size={14} />
+      </button>
       <!-- Refresh -->
       <button
         onclick={fetchTranscripts}

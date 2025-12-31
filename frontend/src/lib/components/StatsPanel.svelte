@@ -1,16 +1,20 @@
 <script>
   import { status, go2rtc } from '../services/api.js';
+  import { streamEvents } from '../stores/streamEvents.svelte.js';
   import Icon from './Icons.svelte';
 
   let { streams = [] } = $props();
 
-  let allStatus = $state({});
+  let allStatus = $derived(streamEvents.allStatuses);
   let go2rtcStatus = $state(null);
-  let isLoading = $state(true);
-  let lastFetchedCount = $state(-1); // Track to prevent duplicate fetches
+  let initialFetchDone = $state(false);
+  let isFetchingGo2rtc = $state(false);
 
   // Derived stats
   let totalStreams = $derived(streams.length);
+  let hasAnyStatus = $derived(Object.keys(allStatus).length > 0);
+  let isLoading = $derived(!initialFetchDone && !hasAnyStatus);
+  
   let activeStreams = $derived(
     Object.values(allStatus).filter(s => s?.is_running).length
   );
@@ -28,28 +32,22 @@
   let go2rtcHealthy = $derived(go2rtcStatus?.status === 'healthy');
   let go2rtcStreamCount = $derived(go2rtcStatus?.stream_count ?? 0);
 
-  // Fetch all stream statuses - only when stream count changes
+  // Fetch initial go2rtc status
   $effect(() => {
-    const count = streams.length;
-    if (count > 0 && count !== lastFetchedCount) {
-      lastFetchedCount = count;
-      fetchAllStatus();
-    }
+    fetchGo2rtcStatus();
   });
 
-  async function fetchAllStatus() {
-    isLoading = true;
+  async function fetchGo2rtcStatus() {
+    isFetchingGo2rtc = true;
     try {
-      const [statusResult, go2rtcResult] = await Promise.all([
-        status.getAll(),
-        go2rtc.getStatus().catch(() => null)
-      ]);
-      allStatus = statusResult || {};
+      const go2rtcResult = await go2rtc.getStatus().catch(() => null);
       go2rtcStatus = go2rtcResult;
+      initialFetchDone = true;
     } catch (e) {
-      console.error('Failed to fetch status:', e);
+      console.error('Failed to fetch go2rtc status:', e);
+    } finally {
+      isFetchingGo2rtc = false;
     }
-    isLoading = false;
   }
 </script>
 
@@ -130,12 +128,12 @@
         </p>
       </div>
       <button
-        onclick={fetchAllStatus}
-        disabled={isLoading}
+        onclick={fetchGo2rtcStatus}
+        disabled={isFetchingGo2rtc}
         class="p-1.5 hover:bg-[var(--color-bg-hover)] rounded transition-colors disabled:opacity-50"
         title="Refresh status"
       >
-        <Icon name="refresh" size={16} class={isLoading ? 'animate-spin' : ''} />
+        <Icon name="refresh" size={16} class={isFetchingGo2rtc ? 'animate-spin' : ''} />
       </button>
     </div>
   </div>

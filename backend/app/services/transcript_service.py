@@ -169,14 +169,14 @@ class TranscriptService:
 
     def cleanup_old(
         self,
-        max_age_days: int = 30,
-        max_per_stream: Optional[int] = None,
+        max_age_days: int = 7,
+        max_per_stream: int = 5000,
     ) -> int:
         """Clean up old transcripts.
 
         Args:
             max_age_days: Delete transcripts older than this many days
-            max_per_stream: Keep only this many per stream (optional)
+            max_per_stream: Keep only this many per stream
 
         Returns:
             Number of transcripts deleted
@@ -184,20 +184,48 @@ class TranscriptService:
         deleted = 0
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
 
-        with Session(engine) as session:
-            # Delete by age
-            old_transcripts = session.exec(
-                select(Transcript).where(Transcript.created_at < cutoff)
-            ).all()
+        try:
+            with Session(engine) as session:
+                # 1. Delete by age (Bulk delete is faster)
+                from sqlmodel import delete
+                statement = delete(Transcript).where(Transcript.created_at < cutoff)
+                result = session.exec(statement)
+                deleted += result.rowcount
 
-            for t in old_transcripts:
-                session.delete(t)
-                deleted += 1
+                # 2. Enforce max per stream if needed
+                if max_per_stream:
+                    # Get list of stream IDs
+                    streams_statement = select(Transcript.stream_id).distinct()
+                    stream_ids = session.exec(streams_statement).all()
+                    
+                    for s_id in stream_ids:
+                        # Find the count
+                        count_statement = select(func.count(Transcript.id)).where(Transcript.stream_id == s_id)
+                        total = session.exec(count_statement).one()
+                        
+                        if total > max_per_stream:
+                            # Find the ID of the N-th newest transcript
+                            nth_newest_statement = select(Transcript.id).where(
+                                Transcript.stream_id == s_id
+                            ).order_by(col(Transcript.created_at).desc()).offset(max_per_stream).limit(1)
+                            
+                            nth_id = session.exec(nth_newest_statement).first()
+                            
+                            if nth_id:
+                                # Delete everything older than or equal to the N-th newest
+                                delete_extra = delete(Transcript).where(
+                                    Transcript.stream_id == s_id,
+                                    Transcript.id <= nth_id
+                                )
+                                result = session.exec(delete_extra)
+                                deleted += result.rowcount
 
-            session.commit()
+                session.commit()
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
 
         if deleted > 0:
-            logger.info(f"Cleaned up {deleted} old transcripts")
+            logger.info(f"Cleaned up {deleted} transcripts from database")
 
         return deleted
 
