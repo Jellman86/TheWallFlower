@@ -127,6 +127,9 @@ api:
   listen: ":${GO2RTC_PORT}"
   origin: "*"
 
+ffmpeg:
+  bin: "ffmpeg"
+
 rtsp:
   listen: ":${GO2RTC_RTSP_PORT}"
 

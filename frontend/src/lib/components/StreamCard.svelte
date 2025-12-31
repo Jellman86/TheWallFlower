@@ -12,8 +12,8 @@
   } = $props();
 
   // Use global store for status and transcripts
-  let streamStatus = $derived(streamEvents.getStreamStatus(stream.id));
-  let transcriptList = $derived(streamEvents.getTranscripts(stream.id));
+  let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
+  let transcriptList = $derived(stream && stream.id ? streamEvents.getTranscripts(stream.id) : []);
 
   let isLoading = $state(false);
   let showTranscripts = $state(true);
