@@ -991,7 +991,7 @@ async def global_events():
             while True:
                 try:
                     # Wait for events with timeout for keepalive
-                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
                     yield event.to_sse()
                 except asyncio.TimeoutError:
                     # Send keepalive comment
@@ -1056,7 +1056,7 @@ async def stream_events(stream_id: int):
 
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
                     yield event.to_sse()
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"

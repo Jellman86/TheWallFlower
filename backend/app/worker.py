@@ -345,17 +345,13 @@ class StreamWorker:
         audio_source = self._get_audio_source_url()
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
-        # -af: added a strict speech bandpass filter and DC offset removal
-        # highpass=f=200: removes low frequency hum/rumble
-        # lowpass=f=3000: removes high frequency hiss/static
-        # volume=2.0: boost the remaining speech signal
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "highpass=f=200,lowpass=f=3000,volume=2.0",
+            "-af", "highpass=f=200,volume=1.5",
             "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
@@ -371,21 +367,15 @@ class StreamWorker:
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
                 # Send initial configuration message (Essential for WhisperLive protocol)
-                # Sending multiple key variants to ensure compatibility with all forks
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
-                    "lang": "en",
                     "task": "transcribe",
                     "model": "base",
-                    "model_size": "base",
-                    "use_vad": False, 
-                    "vad_filter": False,
-                    "translate": False,
-                    "enable_translation": False
+                    "use_vad": True
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Multi-variant handshake sent for stream {self.config.id}")
+                logger.info(f"Handshake sent (VAD on) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -464,13 +454,27 @@ class StreamWorker:
             try:
                 message = await asyncio.wait_for(ws.recv(), timeout=1.0)
                 data = json.loads(message)
+                
+                logger.info(f"Received from WhisperLive for stream {self.config.id}: {data}")
 
+                # Handle both single transcript and segment list formats
+                segments_to_process = []
+                
                 if "text" in data:
+                    segments_to_process.append(data)
+                elif "segments" in data and isinstance(data["segments"], list):
+                    segments_to_process.extend(data["segments"])
+
+                for seg_data in segments_to_process:
+                    text = seg_data.get("text", "").strip()
+                    if not text:
+                        continue
+                        
                     segment = TranscriptSegment(
-                        text=data.get("text", ""),
-                        start_time=data.get("start", 0.0),
-                        end_time=data.get("end", 0.0),
-                        is_final=data.get("is_final", False)
+                        text=text,
+                        start_time=float(seg_data.get("start", 0.0)),
+                        end_time=float(seg_data.get("end", 0.0)),
+                        is_final=seg_data.get("is_final", seg_data.get("completed", False))
                     )
 
                     with self._transcript_lock:
@@ -480,7 +484,7 @@ class StreamWorker:
 
                     self._status.last_transcript = segment.text
 
-                    if segment.is_final and segment.text.strip():
+                    if segment.is_final:
                         transcript_service.add(TranscriptCreate(
                             stream_id=self.config.id,
                             text=segment.text,
