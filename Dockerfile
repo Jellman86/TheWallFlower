@@ -65,7 +65,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /data
 
 # Environment defaults
-ENV DATABASE_URL="sqlite:///data/thewallflower.db" \
+ENV DATABASE_URL="sqlite:////data/thewallflower.db" \
     WHISPER_HOST="whisper-live" \
     WHISPER_PORT="9090" \
     LOG_LEVEL="INFO" \

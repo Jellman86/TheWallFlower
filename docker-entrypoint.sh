@@ -55,7 +55,7 @@ echo "  ╚═══════════════════════
 echo ""
 
 # Environment defaults
-export DATABASE_URL="${DATABASE_URL:-sqlite:///data/thewallflower.db}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:////data/thewallflower.db}"
 export WHISPER_HOST="${WHISPER_HOST:-whisper-live}"
 export WHISPER_PORT="${WHISPER_PORT:-9090}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"

@@ -13,7 +13,7 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     # Database
-    database_url: str = "sqlite:///data/thewallflower.db"
+    database_url: str = "sqlite:////data/thewallflower.db"
 
     # WhisperLive connection
     whisper_host: str = "whisper-live"
