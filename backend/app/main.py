@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
+    # Give go2rtc a moment to fully settle after port check
+    logger.info("Waiting for go2rtc to settle...")
+    await asyncio.sleep(5)
+
     # Start all configured streams (now async)
     await stream_manager.start_all()
     logger.info("Stream manager started")
