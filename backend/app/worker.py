@@ -341,9 +341,14 @@ class StreamWorker:
         audio_source = self._get_audio_source_url()
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
+        # Added reconnect flags for robustness
         ffmpeg_cmd = [
             "ffmpeg",
-            "-loglevel", "warning",
+            "-loglevel", "info",
+            "-reconnect", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
@@ -368,11 +373,11 @@ class StreamWorker:
                     "uid": f"stream_{self.config.id}",
                     "language": "en",
                     "task": "transcribe",
-                    "model": "base.en", # Matches WHISPER_MODEL default
-                    "use_vad": True
+                    "model": "base.en", 
+                    "use_vad": False # Disable VAD for testing to see if we get ANY output
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id}")
+                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id} (VAD disabled)")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -435,10 +440,15 @@ class StreamWorker:
                 logger.warning(f"FFmpeg process ended for stream {self.config.id}")
                 break
 
-            # This read is still blocking, but with -stimeout in FFmpeg, 
-            # FFmpeg itself will exit if source dies, causing read to return empty bytes.
-            audio_chunk = ffmpeg_process.stdout.read(chunk_size)
+            # Use asyncio.to_thread for the blocking read to avoid freezing the event loop
+            try:
+                audio_chunk = await asyncio.to_thread(ffmpeg_process.stdout.read, chunk_size)
+            except Exception as e:
+                logger.error(f"FFmpeg read error for stream {self.config.id}: {e}")
+                break
+
             if not audio_chunk:
+                logger.warning(f"FFmpeg stdout EOF for stream {self.config.id}")
                 break
 
             with self._status_lock:
@@ -450,6 +460,7 @@ class StreamWorker:
                 logger.error(f"Error sending audio for stream {self.config.id}: {e}")
                 break
 
+            # Small sleep to yield control
             await asyncio.sleep(0.01)
 
     async def _receive_transcripts(self, ws) -> None:
