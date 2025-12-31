@@ -124,9 +124,18 @@ log_info "Generating go2rtc configuration..."
 
 # Build candidates list if provided
 CANDIDATES_YAML=""
+
+# Option 1: Full list provided manually
 if [ -n "$WEBRTC_CANDIDATES" ]; then
-    log_info "Adding WebRTC candidates: $WEBRTC_CANDIDATES"
+    log_info "Adding WebRTC candidates from list: $WEBRTC_CANDIDATES"
     CANDIDATES_YAML="    - \"$WEBRTC_CANDIDATES\""
+
+# Option 2: Constructed from IP/Port components (Easier for users)
+elif [ -n "$WEBRTC_ADVERTISED_IP" ]; then
+    # Default to standard port if not set
+    CAND_PORT="${WEBRTC_ADVERTISED_PORT:-$GO2RTC_WEBRTC_PORT}"
+    log_info "Adding WebRTC candidate from IP/Port: $WEBRTC_ADVERTISED_IP:$CAND_PORT"
+    CANDIDATES_YAML="    - \"$WEBRTC_ADVERTISED_IP:$CAND_PORT\""
 fi
 
 cat > "$GO2RTC_CONFIG_PATH" << EOYAML

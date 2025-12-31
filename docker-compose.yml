@@ -24,9 +24,15 @@ services:
       - GO2RTC_PORT=8954
       - GO2RTC_RTSP_PORT=8955
       - GO2RTC_WEBRTC_PORT=8956
-      # WebRTC Candidates: Add your Host IP or Domain here to fix ICE failures
-      # e.g., "192.168.1.50:8555" or "stun:8555" (mapped port)
-      - WEBRTC_CANDIDATES=${WEBRTC_CANDIDATES}
+      
+      # WebRTC Configuration (Critical for Bridge Mode/TrueNAS)
+      # The IP address of your TrueNAS server (e.g., 192.168.1.50)
+      # DNS names are allowed but raw IP is recommended for LAN reliability.
+      - WEBRTC_ADVERTISED_IP=${WEBRTC_ADVERTISED_IP}
+      
+      # The port mapped to 8956 (default: 8956)
+      - WEBRTC_ADVERTISED_PORT=${WEBRTC_ADVERTISED_PORT:-8956}
+
     depends_on:
       - whisper-live
     restart: unless-stopped
