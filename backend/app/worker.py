@@ -355,14 +355,14 @@ class StreamWorker:
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
         # WhisperLive server expects 16kHz Mono Float32 (f32le)
-        # volume=0.8 and loudnorm to provide clean balanced signal
+        # Removed loudnorm to prevent noise boosting. Added highpass to remove rumble.
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "volume=0.8,aresample=async=1,loudnorm",
+            "-af", "highpass=f=200,volume=1.5,aresample=async=1",
             "-c:a", "pcm_f32le",
             "-ar", "16000",
             "-ac", "1",
@@ -377,7 +377,7 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Handshake: use configured model; Sensitive VAD settings
+                # Handshake: use configured model; Standard VAD settings to reduce hallucinations
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
@@ -385,8 +385,8 @@ class StreamWorker:
                     "model": self.whisper_model,
                     "use_vad": True,
                     "vad_parameters": {
-                        "onset": 0.1,
-                        "offset": 0.1,
+                        "onset": 0.5,
+                        "offset": 0.5,
                     },
                     "chunk_size": 1.0
                 }
@@ -544,7 +544,7 @@ class StreamWorker:
                         self.on_transcript(self.config.id, segment)
 
                     event_broadcaster.emit_transcript(self.config.id, {
-                        "id": f"{start_time:.2f}_{text[:20]}",
+                        "id": f"{start_time:.2f}",
                         "text": segment.text,
                         "start_time": segment.start_time,
                         "end_time": segment.end_time,
