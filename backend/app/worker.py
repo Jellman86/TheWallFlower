@@ -344,14 +344,19 @@ class StreamWorker:
 
         audio_source = self._get_audio_source_url()
 
-        # Simplest possible FFmpeg command to avoid numerical errors
+        # FFmpeg command: Extracts audio from go2rtc RTSP restream
+        # -af: added a strict speech bandpass filter and DC offset removal
+        # highpass=f=200: removes low frequency hum/rumble
+        # lowpass=f=3000: removes high frequency hiss/static
+        # volume=2.0: boost the remaining speech signal
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-acodec", "pcm_s16le",
+            "-af", "highpass=f=200,lowpass=f=3000,volume=2.0",
+            "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
             "-f", "s16le",
@@ -365,23 +370,28 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Comprehensive handshake matching official client
+                # Send initial configuration message (Essential for WhisperLive protocol)
+                # Sending multiple key variants to ensure compatibility with all forks
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
-                    "lang": "en", # Dual keys for compatibility
+                    "lang": "en",
                     "task": "transcribe",
-                    "model": "base", # Use standard size name
-                    "use_vad": False, # Keep off for debugging
-                    "translate": False
+                    "model": "base",
+                    "model_size": "base",
+                    "use_vad": False, 
+                    "vad_filter": False,
+                    "translate": False,
+                    "enable_translation": False
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent for stream {self.config.id}: {config_msg['uid']}")
+                logger.info(f"Multi-variant handshake sent for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    stderr=subprocess.PIPE,
+                    bufsize=10**6
                 )
                 self._ffmpeg_process = ffmpeg_process
                 self._status.audio_connected = True
