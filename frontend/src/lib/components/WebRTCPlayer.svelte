@@ -82,16 +82,29 @@
         console.log(`[WebRTC ${streamId}] Received track:`, event.track.kind);
         if (videoElement && event.streams[0]) {
           videoElement.srcObject = event.streams[0];
+          
+          // Debugging video events
+          videoElement.onloadstart = () => console.log(`[Video ${streamId}] Load start`);
+          videoElement.onplaying = () => {
+            console.log(`[Video ${streamId}] Playing`);
+            console.log(`[Video ${streamId}] Resolution: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+          };
+          videoElement.onresize = () => console.log(`[Video ${streamId}] Resize: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+          videoElement.onwaiting = () => console.log(`[Video ${streamId}] Waiting for data...`);
+          
           // Ensure playback starts
-          videoElement.play().catch(e => {
-            // Autoplay might be blocked if not muted
-            if (e.name === 'NotAllowedError' && !muted) {
-              console.warn('Autoplay blocked, muting and retrying');
-              muted = true;
-              videoElement.muted = true;
-              videoElement.play().catch(console.error);
-            }
-          });
+          // MUST be muted for autoplay to work reliably in most browsers
+          videoElement.muted = true;
+          muted = true;
+          
+          const playPromise = videoElement.play();
+          if (playPromise !== undefined) {
+            playPromise.then(() => {
+                console.log(`[Video ${streamId}] Autoplay started successfully`);
+            }).catch(e => {
+                console.error(`[Video ${streamId}] Autoplay failed:`, e);
+            });
+          }
         }
       };
 
