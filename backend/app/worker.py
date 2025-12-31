@@ -105,11 +105,13 @@ class StreamWorker:
         config: StreamConfig,
         whisper_host: str = "localhost",
         whisper_port: int = 9090,
+        whisper_model: str = "base.en",
         on_transcript: Optional[Callable[[int, TranscriptSegment], None]] = None,
     ):
         self.config = config
         self.whisper_host = whisper_host
         self.whisper_port = whisper_port
+        self.whisper_model = whisper_model
         self.on_transcript = on_transcript
 
         # Thread control
@@ -375,12 +377,12 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Handshake: tiny.en for speed; Sensitive VAD settings
+                # Handshake: use configured model; Sensitive VAD settings
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
                     "task": "transcribe",
-                    "model": "tiny.en",
+                    "model": self.whisper_model,
                     "use_vad": True,
                     "vad_parameters": {
                         "onset": 0.1,

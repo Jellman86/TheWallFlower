@@ -2,6 +2,7 @@
 
 ## Resolved Issues
 - **Transcription Restored**: The audio pipeline was stabilized by removing aggressive FFmpeg filters that caused numerical overflows in the Whisper backend.
+- **OpenVINO Model Loading**: Fixed `401 Client Error` when using OpenVINO backend by making `WHISPER_MODEL` configurable and setting it to a valid Hugging Face Repo ID (e.g., `OpenVINO/whisper-tiny-fp16-ov`) instead of OpenAI model names.
 - **VAD Hallucinations Fixed**: Re-enabled VAD (Voice Activity Detection) and normalized audio gain to prevent "noise-hallucinations" (e.g., repetitive `))))))`).
 - **SSE Stability**: Reduced keepalive timeout from 15s to 5s to prevent connection drops behind reverse proxies.
 - **Handshake Compatibility**: Updated the handshake to use standard parameters and added support for the `segments` list format returned by WhisperLive.

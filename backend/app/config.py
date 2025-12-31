@@ -18,6 +18,7 @@ class Settings:
     # WhisperLive connection
     whisper_host: str = "whisper-live"
     whisper_port: int = 9090
+    whisper_model: str = "base.en"
 
     # go2rtc configuration (ports offset from Frigate defaults to avoid conflicts)
     go2rtc_host: str = "localhost"
@@ -60,6 +61,7 @@ def get_settings() -> Settings:
         # WhisperLive
         whisper_host=os.getenv("WHISPER_HOST", Settings.whisper_host),
         whisper_port=int(os.getenv("WHISPER_PORT", str(Settings.whisper_port))),
+        whisper_model=os.getenv("WHISPER_MODEL", Settings.whisper_model),
 
         # go2rtc
         go2rtc_host=os.getenv("GO2RTC_HOST", Settings.go2rtc_host),

@@ -16,6 +16,7 @@ services:
       - DATABASE_URL=sqlite:////data/thewallflower.db
       - WHISPER_HOST=whisper-live
       - WHISPER_PORT=9090
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
@@ -62,7 +63,7 @@ services:
         - /dev/dri:/dev/dri
     group_add:
       - "44"
-      - "109"    # video group GID (use number to avoid group name issues)
+      - "109"   # video group GID (use number to avoid group name issues)
     #   - "109"   # render group GID (may vary - check with: getent group render)
     #
     # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration

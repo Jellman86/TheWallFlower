@@ -66,6 +66,7 @@ class StreamManager:
 
         self._whisper_host = settings.whisper_host
         self._whisper_port = settings.whisper_port
+        self._whisper_model = settings.whisper_model
 
         self._go2rtc = Go2RTCClient(
             host=settings.go2rtc_host,
@@ -196,6 +197,7 @@ class StreamManager:
                 config=config,
                 whisper_host=self._whisper_host,
                 whisper_port=self._whisper_port,
+                whisper_model=self._whisper_model,
                 on_transcript=self._on_transcript
             )
 
