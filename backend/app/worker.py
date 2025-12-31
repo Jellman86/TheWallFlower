@@ -124,9 +124,10 @@ class StreamWorker:
         # Status
         self._status = StreamStatus(stream_id=config.id)
 
-        # Transcript buffer
+        # Transcript buffer and deduplication
         self._transcript_segments: List[TranscriptSegment] = []
         self._transcript_lock = threading.Lock()
+        self._processed_segment_ids = set() # Track (start_time, text) for is_final segments
 
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0
@@ -474,13 +475,24 @@ class StreamWorker:
                     if not text:
                         continue
                         
-                    logger.info(f"Valid transcript for stream {self.config.id}: {text}")
+                    start_time = float(seg_data.get("start", 0.0))
+                    is_final = seg_data.get("is_final", seg_data.get("completed", False))
+                    
+                    # Deduplication: Only process 'final' segments once
+                    if is_final:
+                        segment_id = f"{start_time:.2f}_{text}"
+                        if segment_id in self._processed_segment_ids:
+                            continue
+                        self._processed_segment_ids.add(segment_id)
+                        # Keep memory usage in check
+                        if len(self._processed_segment_ids) > 1000:
+                            self._processed_segment_ids.clear() 
 
                     segment = TranscriptSegment(
                         text=text,
-                        start_time=float(seg_data.get("start", 0.0)),
+                        start_time=start_time,
                         end_time=float(seg_data.get("end", 0.0)),
-                        is_final=seg_data.get("is_final", seg_data.get("completed", False))
+                        is_final=is_final
                     )
 
                     with self._transcript_lock:
