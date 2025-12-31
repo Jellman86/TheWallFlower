@@ -81,29 +81,31 @@
       pc.ontrack = (event) => {
         console.log(`[WebRTC ${streamId}] Received track:`, event.track.kind);
         if (videoElement && event.streams[0]) {
-          videoElement.srcObject = event.streams[0];
-          
-          // Debugging video events
-          videoElement.onloadstart = () => console.log(`[Video ${streamId}] Load start`);
-          videoElement.onplaying = () => {
-            console.log(`[Video ${streamId}] Playing`);
-            console.log(`[Video ${streamId}] Resolution: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
-          };
-          videoElement.onresize = () => console.log(`[Video ${streamId}] Resize: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
-          videoElement.onwaiting = () => console.log(`[Video ${streamId}] Waiting for data...`);
-          
-          // Ensure playback starts
-          // MUST be muted for autoplay to work reliably in most browsers
-          videoElement.muted = true;
-          muted = true;
-          
-          const playPromise = videoElement.play();
-          if (playPromise !== undefined) {
-            playPromise.then(() => {
-                console.log(`[Video ${streamId}] Autoplay started successfully`);
-            }).catch(e => {
-                console.error(`[Video ${streamId}] Autoplay failed:`, e);
-            });
+          // Avoid re-setting if already connected to the same stream
+          if (videoElement.srcObject !== event.streams[0]) {
+            videoElement.srcObject = event.streams[0];
+            
+            // Debugging video events
+            videoElement.onloadstart = () => console.log(`[Video ${streamId}] Load start`);
+            videoElement.onplaying = () => {
+              console.log(`[Video ${streamId}] Playing`);
+              console.log(`[Video ${streamId}] Resolution: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+            };
+            videoElement.onresize = () => console.log(`[Video ${streamId}] Resize: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+            videoElement.onwaiting = () => console.log(`[Video ${streamId}] Waiting for data...`);
+            
+            // Ensure playback starts
+            // MUST be muted for autoplay to work reliably in most browsers
+            videoElement.muted = true;
+            
+            const playPromise = videoElement.play();
+            if (playPromise !== undefined) {
+              playPromise.then(() => {
+                  console.log(`[Video ${streamId}] Autoplay started successfully`);
+              }).catch(e => {
+                  console.error(`[Video ${streamId}] Autoplay failed:`, e);
+              });
+            }
           }
         }
       };
@@ -127,9 +129,9 @@
         }
         
         const checkState = () => {
-          console.log(`[WebRTC ${streamId}] ICE gathering state:`, pc.iceGatheringState);
-          if (pc.iceGatheringState === 'complete') {
-            pc.removeEventListener('icegatheringstatechange', checkState);
+          console.log(`[WebRTC ${streamId}] ICE gathering state:`, pc?.iceGatheringState);
+          if (pc?.iceGatheringState === 'complete') {
+            pc?.removeEventListener('icegatheringstatechange', checkState);
             resolve();
           }
         };
@@ -138,7 +140,9 @@
         
         // Wait max 3s for candidates - 1s was sometimes too short for complex networks
         setTimeout(() => {
-            pc.removeEventListener('icegatheringstatechange', checkState);
+            if (pc) {
+              pc.removeEventListener('icegatheringstatechange', checkState);
+            }
             resolve();
         }, 3000);
       });

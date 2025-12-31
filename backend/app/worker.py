@@ -338,21 +338,17 @@ class StreamWorker:
         whisper_url = f"ws://{self.whisper_host}:{self.whisper_port}"
         logger.info(f"Connecting to WhisperLive at {whisper_url}")
 
-        audio_source = self._get_audio_source_url()
-        
-        # FFmpeg command: Added -stimeout (socket timeout) and -re (read input at native frame rate)
-        # -stimeout 5000000 = 5 seconds timeout for TCP. Prevents hanging on dead sockets.
+        # FFmpeg command: Extracts audio from go2rtc RTSP restream
         ffmpeg_cmd = [
             "ffmpeg",
-            "-stimeout", "5000000", # 5s Socket timeout (Critical for robustness)
+            "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-acodec", "pcm_s16le",
+            "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
             "-f", "s16le",
-            "-loglevel", "warning",
             "pipe:1"
         ]
 

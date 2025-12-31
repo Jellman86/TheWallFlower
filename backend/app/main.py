@@ -660,7 +660,7 @@ async def stream_webrtc_proxy(stream_id: int, request: Request):
 # =============================================================================
 
 @app.get("/api/streams/{stream_id}/transcripts")
-def get_transcripts(stream_id: int, limit: int = 50) -> Dict[str, Any]:
+def get_transcripts(stream_id: int, limit: int = 50, session: Session = Depends(get_session)) -> Dict[str, Any]:
     """Get recent transcripts for a stream (real-time from memory).
 
     For live/real-time transcripts while stream is running.
@@ -668,7 +668,16 @@ def get_transcripts(stream_id: int, limit: int = 50) -> Dict[str, Any]:
     """
     worker = stream_manager.get_worker(stream_id)
     if not worker:
-        raise HTTPException(status_code=404, detail="Stream not found or not running")
+        # Check if stream exists at all
+        stream = session.get(StreamConfig, stream_id)
+        if not stream:
+            raise HTTPException(status_code=404, detail="Stream not found")
+        
+        return {
+            "stream_id": stream_id,
+            "transcripts": [],
+            "count": 0,
+        }
 
     transcripts = worker.transcripts[-limit:]
     return {
@@ -945,7 +954,7 @@ async def global_events():
             while True:
                 try:
                     # Wait for events with timeout for keepalive
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield event.to_sse()
                 except asyncio.TimeoutError:
                     # Send keepalive comment
@@ -1010,7 +1019,7 @@ async def stream_events(stream_id: int):
 
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield event.to_sse()
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
