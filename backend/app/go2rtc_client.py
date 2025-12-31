@@ -83,17 +83,17 @@ class Go2RTCClient:
 
         Args:
             host: go2rtc host (default: from GO2RTC_HOST env or localhost)
-            port: go2rtc HTTP API port (default: from GO2RTC_PORT env or 1985)
-            rtsp_port: go2rtc RTSP port (default: from GO2RTC_RTSP_PORT env or 8654)
-            webrtc_port: go2rtc WebRTC port (default: from GO2RTC_WEBRTC_PORT env or 8655)
+            port: go2rtc HTTP API port (default: from GO2RTC_PORT env or 8954)
+            rtsp_port: go2rtc RTSP port (default: from GO2RTC_RTSP_PORT env or 8955)
+            webrtc_port: go2rtc WebRTC port (default: from GO2RTC_WEBRTC_PORT env or 8956)
             timeout: Request timeout in seconds
 
         Note: Ports are offset from Frigate defaults (1984/8554/8555) to avoid conflicts.
         """
         self.host = host or os.getenv("GO2RTC_HOST", "localhost")
-        self.port = port or int(os.getenv("GO2RTC_PORT", "1985"))
-        self.rtsp_port = rtsp_port or int(os.getenv("GO2RTC_RTSP_PORT", "8654"))
-        self.webrtc_port = webrtc_port or int(os.getenv("GO2RTC_WEBRTC_PORT", "8655"))
+        self.port = port or int(os.getenv("GO2RTC_PORT", "8954"))
+        self.rtsp_port = rtsp_port or int(os.getenv("GO2RTC_RTSP_PORT", "8955"))
+        self.webrtc_port = webrtc_port or int(os.getenv("GO2RTC_WEBRTC_PORT", "8956"))
         self.timeout = timeout
 
         self._base_url = f"http://{self.host}:{self.port}"

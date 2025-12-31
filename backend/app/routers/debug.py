@@ -159,14 +159,13 @@ async def check_services():
          int(os.environ.get("WHISPER_PORT", "9090"))),
     ]
 
-    # Add common services that might be on the network
+    # Common services to check
     common_services = [
-        ("yawamf-backend", "yawamf-backend", 8000),
-        ("frigate", "frigate", 5000),
+        ("TheWallflower Backend", "localhost", 8953),
+        ("WhisperLive", os.environ.get("WHISPER_HOST", "whisper-live"), int(os.environ.get("WHISPER_PORT", "9090"))),
     ]
 
     results = []
-
     for name, host, port in services + common_services:
         reachable, response_time, error = await check_tcp_port(host, port)
         results.append(ServiceCheck(
@@ -174,7 +173,7 @@ async def check_services():
             host=host,
             port=port,
             reachable=reachable,
-            response_time_ms=round(response_time, 2),
+            response_time=response_time,
             error=error
         ))
 
@@ -292,32 +291,27 @@ async def test_http_post(
 @router.get("/yawamf/status")
 async def get_yawamf_status():
     """Get YA-WAMF backend status if available."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            health = await client.get("http://yawamf-backend:8000/health")
-            classifier = await client.get("http://yawamf-backend:8000/api/classifier/status")
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        try:
+            health = await client.get("http://localhost:8953/api/health")
+            system_status["health"] = health.json()
+        except Exception as e:
+            system_status["health"] = {"error": str(e)}
 
-            return {
-                "available": True,
-                "health": health.json(),
-                "classifier": classifier.json()
-            }
-    except Exception as e:
-        return {
-            "available": False,
-            "error": str(e)
-        }
+    return system_status
 
 
 @router.get("/yawamf/events")
 async def get_yawamf_events(limit: int = Query(5, ge=1, le=50)):
     """Get recent events from YA-WAMF."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"http://yawamf-backend:8000/api/events",
-                params={"limit": limit}
-            )
+    # Connect to SSE endpoint
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        async with client.stream(
+            "GET",
+            f"http://localhost:8953/api/events",
+            headers={"Accept": "text/event-stream"}
+        ) as response:
             return response.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to connect to YA-WAMF: {e}")

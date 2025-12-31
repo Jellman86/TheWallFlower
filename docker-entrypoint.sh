@@ -63,9 +63,9 @@ export WORKERS="${WORKERS:-1}"
 
 # go2rtc configuration (ports offset from Frigate defaults to avoid conflicts)
 export GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
-export GO2RTC_PORT="${GO2RTC_PORT:-1985}"
-export GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8654}"
-export GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-8655}"
+export GO2RTC_PORT="${GO2RTC_PORT:-8954}"
+export GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8955}"
+export GO2RTC_WEBRTC_PORT="${GO2RTC_WEBRTC_PORT:-8956}"
 export GO2RTC_CONFIG_PATH="${GO2RTC_CONFIG_PATH:-/data/go2rtc.yaml}"
 
 # Ensure data directory exists
@@ -176,14 +176,14 @@ if [ "$1" = "dev" ]; then
     log_info "Running in development mode"
     uvicorn app.main:app \
         --host 0.0.0.0 \
-        --port 8000 \
+        --port 8953 \
         --reload \
         --log-level "${LOG_LEVEL,,}" &
 else
     # Production mode
     uvicorn app.main:app \
         --host 0.0.0.0 \
-        --port 8000 \
+        --port 8953 \
         --workers "$WORKERS" \
         --log-level "${LOG_LEVEL,,}" &
 fi

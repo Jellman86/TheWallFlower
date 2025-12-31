@@ -6,10 +6,10 @@ services:
       dockerfile: Dockerfile
     container_name: thewallflower
     ports:
-      - "${PORT:-8080}:8000"           # Main API
-      - "${GO2RTC_PORT:-1985}:1985"    # go2rtc HTTP API & WebUI (1985 to avoid Frigate)
-      - "${GO2RTC_RTSP_PORT:-8654}:8654"   # go2rtc RTSP server (8654 to avoid Frigate)
-      - "${GO2RTC_WEBRTC_PORT:-8655}:8655" # go2rtc WebRTC (8655 to avoid Frigate)
+      - "${PORT:-8953}:8953"           # Main API
+      - "${GO2RTC_PORT:-8954}:8954"    # go2rtc HTTP API & WebUI
+      - "${GO2RTC_RTSP_PORT:-8955}:8955"   # go2rtc RTSP server
+      - "${GO2RTC_WEBRTC_PORT:-8956}:8956" # go2rtc WebRTC
     volumes:
       - ${CONFIG_PATH}/thewallflower/data:/data
     environment:
@@ -19,11 +19,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
-      # go2rtc configuration (ports offset from Frigate to avoid conflicts)
+      # go2rtc configuration
       - GO2RTC_HOST=${GO2RTC_HOST:-localhost}
-      - GO2RTC_PORT=1985
-      - GO2RTC_RTSP_PORT=8654
-      - GO2RTC_WEBRTC_PORT=8655
+      - GO2RTC_PORT=8954
+      - GO2RTC_RTSP_PORT=8955
+      - GO2RTC_WEBRTC_PORT=8956
     depends_on:
       - whisper-live
     restart: unless-stopped
@@ -38,7 +38,7 @@ services:
     image: ${WHISPER_IMAGE:-ghcr.io/collabora/whisperlive-cpu:latest}
     container_name: whisper-live
     ports:
-      - "${WHISPER_PORT:-9090}:9090"
+      - "${WHISPER_PORT:-8957}:9090"
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
     restart: unless-stopped

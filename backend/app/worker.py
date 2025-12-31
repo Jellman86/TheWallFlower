@@ -5,7 +5,7 @@ Handles audio extraction from RTSP streams for WhisperLive transcription.
 With go2rtc integration:
 - go2rtc handles ALL video streaming (RTSP → WebRTC/MJPEG)
 - This worker ONLY handles audio extraction for Whisper transcription
-- Audio is extracted from go2rtc's RTSP restream (localhost:8654)
+- Audio is extracted from go2rtc's RTSP restream (localhost:8955)
 - No OpenCV video processing - eliminates CPU overhead and browser hangs
 """""
 
@@ -329,7 +329,7 @@ class StreamWorker:
 
     def _get_audio_source_url(self) -> str:
         """Get the audio source URL."""
-        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8654"))
+        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8955"))
         go2rtc_stream_name = f"camera_{self.config.id}"
         return f"rtsp://localhost:{go2rtc_rtsp_port}/{go2rtc_stream_name}"
 
