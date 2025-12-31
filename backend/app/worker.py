@@ -363,6 +363,17 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
+                # Send initial configuration message (Essential for WhisperLive protocol)
+                config_msg = {
+                    "uid": f"stream_{self.config.id}",
+                    "language": "en",
+                    "task": "transcribe",
+                    "model": "base.en", # Matches WHISPER_MODEL default
+                    "use_vad": True
+                }
+                await ws.send(json.dumps(config_msg))
+                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id}")
+
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
                     stdout=subprocess.PIPE,
@@ -434,9 +445,13 @@ class StreamWorker:
                 self._status.last_audio_time = datetime.now()
 
             try:
-                await ws.send(audio_chunk)
+                if ws.open:
+                    await ws.send(audio_chunk)
+                else:
+                    logger.warning(f"Websocket closed for stream {self.config.id}")
+                    break
             except Exception as e:
-                logger.error(f"Error sending audio: {e}")
+                logger.error(f"Error sending audio for stream {self.config.id}: {e}")
                 break
 
             await asyncio.sleep(0.01)
