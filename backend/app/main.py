@@ -970,6 +970,24 @@ async def global_events():
             # Send initial connection event
             yield "event: connected\ndata: {\"message\": \"Connected to event stream\"}\n\n"
 
+            # Send current status of all active streams
+            statuses = stream_manager.get_all_statuses()
+            for stream_id, status in statuses.items():
+                payload = {
+                    "type": "status",
+                    "stream_id": stream_id,
+                    "data": {
+                        "is_running": status.is_running,
+                        "video_connected": status.video_connected,
+                        "audio_connected": status.audio_connected,
+                        "whisper_connected": status.whisper_connected,
+                        "fps": status.fps,
+                        "error": status.error,
+                    },
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                yield f"event: status\ndata: {json.dumps(payload)}\n\n"
+
             while True:
                 try:
                     # Wait for events with timeout for keepalive

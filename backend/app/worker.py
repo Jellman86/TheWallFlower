@@ -345,15 +345,14 @@ class StreamWorker:
         audio_source = self._get_audio_source_url()
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
-        # -af: added a speech-focused bandpass filter and moderate volume boost
-        # highpass/lowpass filters help remove noise that can trip up VAD
+        # Simplified filters and increased volume to ensure WhisperLive 'hears' anything
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "highpass=f=200,lowpass=f=3000,volume=1.5",
+            "-af", "volume=2.5",
             "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
@@ -376,10 +375,10 @@ class StreamWorker:
                     "language": "en",
                     "task": "transcribe",
                     "model": "base.en", 
-                    "use_vad": True
+                    "use_vad": False # DISABLED FOR DEBUGGING
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id}")
+                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id} (VAD: False)")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
