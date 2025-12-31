@@ -59,9 +59,10 @@ services:
     # Intel GPU support - uncomment for Intel iGPU/Arc acceleration
     # Also set WHISPER_IMAGE=ghcr.io/collabora/whisperlive-openvino:latest
     devices:
-    - /dev/dri:/dev/dri
+        - /dev/dri:/dev/dri
     group_add:
-      - "44"    # video group GID (use number to avoid group name issues)
+      - "44"
+      - "109"    # video group GID (use number to avoid group name issues)
     #   - "109"   # render group GID (may vary - check with: getent group render)
     #
     # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration
