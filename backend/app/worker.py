@@ -328,10 +328,12 @@ class StreamWorker:
             logger.debug(f"FFmpeg stderr reader ended: {e}")
 
     def _get_audio_source_url(self) -> str:
-        """Get the audio source URL."""
-        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8955"))
-        go2rtc_stream_name = f"camera_{self.config.id}"
-        return f"rtsp://localhost:{go2rtc_rtsp_port}/{go2rtc_stream_name}"
+        """Get the audio source URL.
+        
+        Using the direct RTSP URL from the camera provides better audio quality
+        and volume for transcription than go2rtc's restream.
+        """
+        return self.config.rtsp_url
 
     async def _whisper_connection(self) -> None:
         """Connect to WhisperLive and stream audio."""
