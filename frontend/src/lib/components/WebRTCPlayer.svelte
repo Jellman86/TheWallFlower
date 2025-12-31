@@ -114,6 +114,7 @@
         }
         
         const checkState = () => {
+          console.log(`[WebRTC ${streamId}] ICE gathering state:`, pc.iceGatheringState);
           if (pc.iceGatheringState === 'complete') {
             pc.removeEventListener('icegatheringstatechange', checkState);
             resolve();
@@ -122,13 +123,14 @@
         
         pc.addEventListener('icegatheringstatechange', checkState);
         
-        // Wait max 1s for candidates - usually sufficient for local/LAN
-        // If gathering takes longer, we'll send what we have
+        // Wait max 3s for candidates - 1s was sometimes too short for complex networks
         setTimeout(() => {
             pc.removeEventListener('icegatheringstatechange', checkState);
             resolve();
-        }, 1000);
+        }, 3000);
       });
+
+      console.log(`[WebRTC ${streamId}] Sending offer to backend...`);
 
       // Send to backend
       const response = await fetch(go2rtc.webrtcApiUrl(streamId), {
@@ -138,10 +140,12 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        const errorDetail = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Server error: ${response.status} - ${errorDetail}`);
       }
 
       const answerSdp = await response.text();
+      console.log(`[WebRTC ${streamId}] Received answer from backend`);
       // Handle the case where the server returns an empty body or error text
       if (!answerSdp || !answerSdp.includes('m=video')) {
          // Try to parse as JSON just in case it's an error object

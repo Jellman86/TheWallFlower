@@ -132,9 +132,11 @@ rtsp:
 
 webrtc:
   listen: ":${GO2RTC_WEBRTC_PORT}"
+  ice_servers:
+    - urls: [ "stun:stun.l.google.com:19302" ]
 
 log:
-  level: info
+  level: debug
 EOYAML
 
 # Start go2rtc in background

@@ -442,25 +442,25 @@ async def get_go2rtc_status() -> Dict[str, Any]:
     Returns:
         go2rtc status and list of configured streams
     """
-    try:
-        is_healthy = await stream_manager.go2rtc.health_check()
-        streams = await stream_manager.go2rtc.get_streams() if is_healthy else {}
-        return {
-            "status": "healthy" if is_healthy else "unhealthy",
-            "host": settings.go2rtc_host,
-            "port": settings.go2rtc_port,
-            "streams": streams,
-            "stream_count": len(streams)
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "host": settings.go2rtc_host,
-            "port": settings.go2rtc_port,
-            "streams": {},
-            "stream_count": 0
-        }
+    is_healthy = await stream_manager.go2rtc.health_check()
+    streams_info = {}
+    
+    if is_healthy:
+        try:
+            streams_info = await stream_manager.go2rtc.get_streams()
+        except Exception as e:
+            logger.error(f"Failed to get go2rtc streams: {e}")
+            is_healthy = False
+
+    return {
+        "status": "healthy" if is_healthy else "unhealthy",
+        "host": settings.go2rtc_host,
+        "port": settings.go2rtc_port,
+        "rtsp_port": settings.go2rtc_rtsp_port,
+        "webrtc_port": settings.go2rtc_webrtc_port,
+        "stream_count": len(streams_info),
+        "streams": streams_info
+    }
 
 
 # =============================================================================
@@ -492,29 +492,27 @@ async def stream_mjpeg_proxy(stream_id: int, fps: int = 10, height: int = 720):
     stream_name = f"camera_{stream_id}"
     go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/stream.mjpeg?src={stream_name}&fps={fps}&height={height}"
 
-    async def proxy_stream():
-        """Proxy the MJPEG stream from go2rtc."""
+    logger.debug(f"Proxying MJPEG stream for stream {stream_id} to {go2rtc_url}")
+
+    async def generate():
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("GET", go2rtc_url) as response:
                     if response.status_code != 200:
-                        logger.error(f"go2rtc returned {response.status_code} for stream {stream_id}")
+                        logger.error(f"go2rtc returned {response.status_code} for MJPEG stream {stream_id}: {await response.aread()}")
                         return
-                    async for chunk in response.aiter_bytes(chunk_size=32768):
+
+                    logger.info(f"MJPEG stream started for stream {stream_id}")
+                    async for chunk in response.aiter_bytes():
                         yield chunk
-        except httpx.ConnectError:
-            logger.error(f"Failed to connect to go2rtc for stream {stream_id}")
+        except httpx.ConnectError as e:
+            logger.error(f"Failed to connect to go2rtc for MJPEG stream {stream_id}: {e}")
         except Exception as e:
-            logger.error(f"MJPEG proxy error for stream {stream_id}: {e}")
+            logger.error(f"Error in MJPEG stream proxy for stream {stream_id}: {e}")
 
     return StreamingResponse(
-        proxy_stream(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
@@ -620,9 +618,12 @@ async def stream_webrtc_proxy(stream_id: int, request: Request):
     stream_name = f"camera_{stream_id}"
     go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/webrtc?src={stream_name}"
 
+    logger.debug(f"Proxying WebRTC signaling for stream {stream_id} to {go2rtc_url}")
+
     try:
         # Get the SDP offer from the request body
         body = await request.body()
+        logger.debug(f"SDP Offer length: {len(body)} bytes")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.post(
@@ -632,17 +633,24 @@ async def stream_webrtc_proxy(stream_id: int, request: Request):
             )
 
             if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail="WebRTC signaling failed")
+                logger.error(f"go2rtc WebRTC signaling failed for stream {stream_id}: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=f"WebRTC signaling failed: {response.text}")
 
+            logger.info(f"WebRTC signaling successful for stream {stream_id}")
             return Response(
                 content=response.content,
                 media_type=response.headers.get("content-type", "application/sdp"),
                 status_code=response.status_code
             )
-    except httpx.ConnectError:
+    except httpx.ConnectError as e:
+        logger.error(f"Failed to connect to go2rtc for WebRTC signaling (stream {stream_id}): {e}")
         raise HTTPException(status_code=502, detail="go2rtc not available")
     except httpx.TimeoutException:
+        logger.error(f"Timeout during WebRTC signaling with go2rtc (stream {stream_id})")
         raise HTTPException(status_code=504, detail="Timeout during WebRTC signaling")
+    except Exception as e:
+        logger.error(f"Unexpected error during WebRTC signaling proxy (stream {stream_id}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================
