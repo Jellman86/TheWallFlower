@@ -90,24 +90,11 @@ log_info "  WHISPER_PORT: $WHISPER_PORT"
 log_info "  LOG_LEVEL: $LOG_LEVEL"
 log_info "  WORKERS: $WORKERS"
 
-# Wait for WhisperLive if configured
-if [ "${WAIT_FOR_WHISPER:-false}" = "true" ]; then
-    log_info "Waiting for WhisperLive at $WHISPER_HOST:$WHISPER_PORT..."
-    MAX_RETRIES=30
-    RETRY_COUNT=0
-    while ! nc -z "$WHISPER_HOST" "$WHISPER_PORT" 2>/dev/null; do
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-        if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-            log_warn "WhisperLive not available after $MAX_RETRIES attempts, continuing anyway"
-            break
-        fi
-        log_info "Waiting for WhisperLive... (attempt $RETRY_COUNT/$MAX_RETRIES)"
-        sleep 2
-    done
-    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-        log_info "WhisperLive is available"
-    fi
-fi
+# Wait for WhisperLive if configured (REMOVED - Application handles reconnection)
+# if [ "${WAIT_FOR_WHISPER:-false}" = "true" ]; then
+#     log_info "Waiting for WhisperLive at $WHISPER_HOST:$WHISPER_PORT..."
+#     ...
+# fi
 
 # Run database migrations if needed
 log_info "Initializing database..."

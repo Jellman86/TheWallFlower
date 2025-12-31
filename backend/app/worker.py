@@ -1,4 +1,4 @@
-"""""Stream worker for TheWallflower.
+"""Stream worker for TheWallflower.
 
 Handles audio extraction from RTSP streams for WhisperLive transcription.
 
@@ -7,7 +7,7 @@ With go2rtc integration:
 - This worker ONLY handles audio extraction for Whisper transcription
 - Audio is extracted from go2rtc's RTSP restream (localhost:8955)
 - No OpenCV video processing - eliminates CPU overhead and browser hangs
-"""""
+"""
 
 import asyncio
 import logging
@@ -345,13 +345,14 @@ class StreamWorker:
         audio_source = self._get_audio_source_url()
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
+        # Simplified: Linear 5x boost to overcome quiet sources without artifacts
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "highpass=f=200,volume=1.5",
+            "-af", "volume=5.0,aresample=async=1",
             "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
@@ -366,16 +367,18 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Send initial configuration message (Essential for WhisperLive protocol)
+                # Send initial configuration message
+                # VAD OFF to see EVERYTHING; tiny.en for speed
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
                     "task": "transcribe",
-                    "model": "base",
-                    "use_vad": True
+                    "model": "tiny.en",
+                    "use_vad": False,
+                    "chunk_size": 1.0
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent (VAD on) for stream {self.config.id}")
+                logger.info(f"Handshake sent (Extra Sensitive) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -390,17 +393,16 @@ class StreamWorker:
                 send_task = asyncio.create_task(self._send_audio(ws, ffmpeg_process))
                 recv_task = asyncio.create_task(self._receive_transcripts(ws))
 
-                # Track which task ends first
                 done, pending = await asyncio.wait(
                     [send_task, recv_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
                 
                 for task in done:
-                    if task == send_task:
-                        logger.warning(f"Audio sender ended first for stream {self.config.id}")
-                    else:
-                        logger.warning(f"Transcript receiver ended first for stream {self.config.id}")
+                    try:
+                        await task
+                    except Exception as e:
+                        logger.error(f"Task failed: {e}")
 
                 for task in pending:
                     task.cancel()
@@ -417,7 +419,8 @@ class StreamWorker:
 
     async def _send_audio(self, ws, ffmpeg_process: subprocess.Popen) -> None:
         """Send audio chunks to WhisperLive with diagnostic sampling."""
-        chunk_size = 8192 # Larger chunks for stability
+        # Standardize to 1.0s blocks (32000 bytes @ 16kHz S16LE Mono)
+        chunk_size = 32000 
         chunks_sent = 0
 
         while not self._stop_event.is_set():
@@ -429,9 +432,8 @@ class StreamWorker:
                 if not audio_chunk:
                     break
 
-                # Diagnostic: Log audio stats every 100 chunks (~50 seconds)
                 chunks_sent += 1
-                if chunks_sent % 100 == 1:
+                if chunks_sent % 30 == 1:
                     import numpy as np
                     samples = np.frombuffer(audio_chunk, dtype=np.int16)
                     max_val = np.max(np.abs(samples)) if len(samples) > 0 else 0
@@ -457,9 +459,7 @@ class StreamWorker:
                 
                 logger.info(f"Received from WhisperLive for stream {self.config.id}: {data}")
 
-                # Handle both single transcript and segment list formats
                 segments_to_process = []
-                
                 if "text" in data:
                     segments_to_process.append(data)
                 elif "segments" in data and isinstance(data["segments"], list):
@@ -470,6 +470,13 @@ class StreamWorker:
                     if not text:
                         continue
                         
+                    # Filter out repetitive character hallucinations
+                    if text.count(')') > 5 or text.count('.') > 15 or len(text) > 500:
+                        logger.debug(f"Ignoring hallucination segment for stream {self.config.id}: {text[:50]}...")
+                        continue
+
+                    logger.info(f"Valid transcript for stream {self.config.id}: {text}")
+
                     segment = TranscriptSegment(
                         text=text,
                         start_time=float(seg_data.get("start", 0.0)),
