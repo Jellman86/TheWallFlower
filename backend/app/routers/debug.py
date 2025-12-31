@@ -291,6 +291,7 @@ async def test_http_post(
 @router.get("/yawamf/status")
 async def get_yawamf_status():
     """Get YA-WAMF backend status if available."""
+    system_status = {}
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
             health = await client.get("http://localhost:8953/api/health")
@@ -305,14 +306,25 @@ async def get_yawamf_status():
 async def get_yawamf_events(limit: int = Query(5, ge=1, le=50)):
     """Get recent events from YA-WAMF."""
     try:
-    # Connect to SSE endpoint
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        async with client.stream(
-            "GET",
-            f"http://localhost:8953/api/events",
-            headers={"Accept": "text/event-stream"}
-        ) as response:
-            return response.json()
+        # Connect to SSE endpoint
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream(
+                "GET",
+                f"http://localhost:8953/api/events",
+                headers={"Accept": "text/event-stream"}
+            ) as response:
+                import json
+                events = []
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[6:])
+                            events.append(data)
+                            if len(events) >= limit:
+                                break
+                        except:
+                            pass
+                return events
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to connect to YA-WAMF: {e}")
 
