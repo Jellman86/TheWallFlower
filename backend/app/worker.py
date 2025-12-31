@@ -330,10 +330,12 @@ class StreamWorker:
     def _get_audio_source_url(self) -> str:
         """Get the audio source URL.
         
-        Using the direct RTSP URL from the camera provides better audio quality
-        and volume for transcription than go2rtc's restream.
+        Using go2rtc's internal RTSP restream ensures go2rtc stays active
+        and provides a consistent source for the transcription worker.
         """
-        return self.config.rtsp_url
+        go2rtc_rtsp_port = int(os.getenv("GO2RTC_RTSP_PORT", "8955"))
+        go2rtc_stream_name = f"camera_{self.config.id}"
+        return f"rtsp://localhost:{go2rtc_rtsp_port}/{go2rtc_stream_name}"
 
     async def _whisper_connection(self) -> None:
         """Connect to WhisperLive and stream audio."""
@@ -342,15 +344,16 @@ class StreamWorker:
 
         audio_source = self._get_audio_source_url()
 
-        # FFmpeg command: Extracts audio from direct camera RTSP
-        # Boost volume to help AI "hear" better and ensure correct format
+        # FFmpeg command: Extracts audio from go2rtc RTSP restream
+        # -af: added a speech-focused bandpass filter and moderate volume boost
+        # highpass/lowpass filters help remove noise that can trip up VAD
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "volume=2.0",
+            "-af", "highpass=f=200,lowpass=f=3000,volume=1.5",
             "-c:a", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
@@ -373,10 +376,10 @@ class StreamWorker:
                     "language": "en",
                     "task": "transcribe",
                     "model": "base.en", 
-                    "use_vad": False # Disable VAD to force output for debugging
+                    "use_vad": True
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id} (VAD: False)")
+                logger.info(f"Sent initial config to WhisperLive for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,

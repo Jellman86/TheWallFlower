@@ -47,13 +47,28 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
-    # Give go2rtc a moment to fully settle after port check
+    # Give go2rtc a moment to fully settle
     logger.info("Waiting for go2rtc to settle...")
     await asyncio.sleep(5)
 
     # Start all configured streams (now async)
     await stream_manager.start_all()
     logger.info("Stream manager started")
+
+    # Start a background task to ensure streams stay registered in go2rtc
+    async def maintenance_task():
+        while True:
+            try:
+                await asyncio.sleep(60) # Every minute
+                if not stream_manager.is_shutting_down:
+                    logger.debug("Running background stream sync...")
+                    await stream_manager.reload_all()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Maintenance task error: {e}")
+
+    asyncio.create_task(maintenance_task())
 
     yield
 
