@@ -11,7 +11,7 @@ services:
       - "${GO2RTC_RTSP_PORT:-8955}:8955"   # go2rtc RTSP server
       - "${GO2RTC_WEBRTC_PORT:-8956}:8956" # go2rtc WebRTC
     volumes:
-      - ./data:/data
+      - ${CONFIG_PATH}/thewallflower/data:/data
     environment:
       - DATABASE_URL=sqlite:////data/thewallflower.db
       - WHISPER_HOST=whisper-live
