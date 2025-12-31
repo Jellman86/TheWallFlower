@@ -632,7 +632,7 @@ async def stream_webrtc_proxy(stream_id: int, request: Request):
                 headers={"Content-Type": request.headers.get("content-type", "application/sdp")}
             )
 
-            if response.status_code != 200:
+            if response.status_code not in (200, 201):
                 logger.error(f"go2rtc WebRTC signaling failed for stream {stream_id}: {response.status_code} - {response.text}")
                 raise HTTPException(status_code=response.status_code, detail=f"WebRTC signaling failed: {response.text}")
 
@@ -642,6 +642,8 @@ async def stream_webrtc_proxy(stream_id: int, request: Request):
                 media_type=response.headers.get("content-type", "application/sdp"),
                 status_code=response.status_code
             )
+    except HTTPException:
+        raise
     except httpx.ConnectError as e:
         logger.error(f"Failed to connect to go2rtc for WebRTC signaling (stream {stream_id}): {e}")
         raise HTTPException(status_code=502, detail="go2rtc not available")
