@@ -34,6 +34,17 @@ WHISPER_RECONNECT_BACKOFF = [1, 2, 5, 10, 30, 60]  # seconds
 FFMPEG_RESTART_DELAY = 2  # seconds
 THREAD_HEALTH_CHECK_INTERVAL = 10  # seconds
 
+# Common Whisper 'silence hallucinations' to ignore
+HALLUCINATION_PHRASES = {
+    "thank you.", "thank you", "you", "you.",
+    "i'm sorry.", "i'm sorry",
+    "thanks for watching.", "subtitle by",
+    "start conversation", "the end",
+    "copyright", "all rights reserved",
+    "amara.org", "captions by",
+    "silence", "bye"
+}
+
 
 class ConnectionState(str, Enum):
     """Stream connection states (for audio/whisper)."""
@@ -355,14 +366,15 @@ class StreamWorker:
 
         # FFmpeg command: Extracts audio from go2rtc RTSP restream
         # WhisperLive server expects 16kHz Mono Float32 (f32le)
-        # Removed loudnorm to prevent noise boosting. Added highpass to remove rumble.
+        # Removed volume boost to prevent raising noise floor.
+        # Filters: Highpass (rumble), Lowpass (hiss), Async Resample
         ffmpeg_cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
             "-rtsp_transport", "tcp",
             "-i", audio_source,
             "-vn",
-            "-af", "highpass=f=200,volume=1.5,aresample=async=1",
+            "-af", "highpass=f=200,lowpass=f=8000,aresample=async=1",
             "-c:a", "pcm_f32le",
             "-ar", "16000",
             "-ac", "1",
@@ -377,7 +389,7 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Handshake: use configured model; Standard VAD settings to reduce hallucinations
+                # Handshake: use configured model; Standard VAD settings
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
@@ -388,10 +400,11 @@ class StreamWorker:
                         "onset": 0.5,
                         "offset": 0.5,
                     },
+                    "initial_prompt": "Silence.",
                     "chunk_size": 1.0
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent (Sensitive VAD, Float32) for stream {self.config.id}")
+                logger.info(f"Handshake sent (Sensitive VAD, Float32, Prompt) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -485,9 +498,8 @@ class StreamWorker:
                     if not text or len(text) < 2:
                         continue
                         
-                    # Ignore 'Thank you.' or 'I'm sorry.' if they are the very first 
-                    # thing heard and very short, as they are common Whisper artifacts
-                    if text.lower() in ["thank you.", "i'm sorry.", "thanks for watching.", "subtitle by"] and not is_final:
+                    # Check against common hallucinations
+                    if text.lower().strip() in HALLUCINATION_PHRASES:
                         continue
                         
                     start_time = float(seg_data.get("start", 0.0))
