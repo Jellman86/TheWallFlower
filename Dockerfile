@@ -9,7 +9,8 @@ WORKDIR /app/frontend
 
 # Copy frontend source
 COPY frontend/package*.json ./
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 COPY frontend/ ./
 RUN npm run build
@@ -25,7 +26,9 @@ ARG GIT_HASH=unknown
 
 # Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ffmpeg \
     libgl1 \
@@ -35,8 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     netcat-openbsd \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
 # Download go2rtc binary for efficient video streaming
 # go2rtc handles RTSP->WebRTC/MJPEG conversion with minimal CPU usage
@@ -51,7 +53,8 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 # Copy backend code
 COPY backend/ ./backend/
