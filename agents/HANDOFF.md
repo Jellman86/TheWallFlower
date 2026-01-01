@@ -1,102 +1,51 @@
-# TheWallflower - Development Handoff
+# Development Handoff - TheWallflower
+**Date:** 2025-12-31
+**Status:** System Refined & Grounding Restructured
 
-**Date:** 2025-12-28
-**Last Updated By:** Claude Opus 4.5
+## 1. IMMEDIATE ACTION REQUIRED
+The system has been significantly refined to mitigate audio hallucinations. These changes are **COMMITTED LOCALLY** but need to be **PUSHED** to trigger the CI/CD pipeline.
 
-## Current State
+**Next Agent Task:**
+1.  Verify the local commits (`git log`).
+2.  Push to remote (`git push`).
+3.  Notify the user that the build is in progress.
 
-The application is a video transcription system that:
-- Streams RTSP video through go2rtc
-- Transcribes audio using Whisper
-- Displays live transcripts in a web UI
+---
 
-### Recent Major Change: go2rtc Integration
+## 2. RECENT ACHIEVEMENTS
 
-The application was refactored from Python MJPEG streaming to use go2rtc for video streaming. This provides:
-- WebRTC for low-latency viewing
-- MJPEG for compatibility
-- HLS for wide device support
+### A. Hallucination Mitigation (Whisper/Audio)
+We have implemented a multi-layered defense against "ghost" transcripts in quiet rooms:
+-   **Audio Filters:** Added `highpass=200` and `lowpass=8000` to the FFmpeg worker. Removed volume boosting.
+-   **Whisper Handshake:** Added `initial_prompt="Silence."`, `condition_on_previous_text=False`, and tuned `no_speech_threshold`/`logprob_threshold`.
+-   **Blacklist:** Expanded `HALLUCINATION_PHRASES` to catch common Whisper artifacts.
 
-## Recent Fixes (Dec 28, 2025)
+### B. Agent Grounding & Documentation
+-   **Restructured `agent_grounding.md`:** Now contains explicit mandates forbidding manual container builds and explaining the mandatory CI/CD path.
+-   **Research Created:** See `RESEARCH_AUDIO_OPTIMIZATION.md` for the deep dive into `birdnet-go` patterns and WhisperLive tuning.
 
-### Issue: Browser Crash When Adding Streams
+---
 
-**Root Cause:** When accessed via HTTPS reverse proxy (e.g., `https://thewallflower.pownet.uk`), the frontend was trying to connect directly to go2rtc on port 1985 using HTTP, causing:
-1. **Mixed content errors** - HTTPS page trying to load HTTP resources
-2. **Port blocked** - Port 1985 not accessible through reverse proxy
+## 3. CORE DOCUMENTS TO READ
+New agents MUST read these before performing any actions:
 
-**Solution Applied (Commits 917b944, 293547f):**
+1.  **`agents/agent_grounding.md`**: The "Laws of the Project". Explains why you must not run `docker build`.
+2.  **`agents/RESEARCH_AUDIO_OPTIMIZATION.md`**: Technical justification for the current audio pipeline.
+3.  **`agents/current_errors.md`**: Track what is resolved and what is still under monitoring.
 
-1. Added proxy endpoints in `backend/app/main.py`:
-   - `/api/streams/{id}/mjpeg` - MJPEG stream proxy
-   - `/api/streams/{id}/frame` - Single frame proxy
-   - `/api/streams/{id}/hls` - HLS playlist proxy
-   - `/api/streams/{id}/webrtc` - WebRTC signaling proxy
+---
 
-2. Updated `frontend/src/lib/services/api.js`:
-   - Removed direct go2rtc URLs (port, baseUrl, webrtcUrl)
-   - All streaming now goes through backend API
-   - Works with any reverse proxy configuration
+## 4. SYSTEM ARCHITECTURE REMINDER
+We use a **Split-Pipeline**:
+-   **Video:** Handled by `go2rtc` (internal port 8954).
+-   **Audio:** Handled by `backend/app/worker.py` (FFmpeg -> WhisperLive).
+-   **Deployment:** GitHub Actions -> User Pulls.
 
-### Files Modified
+## 5. LOCAL COMMITS PENDING PUSH
+- `c6662ca`: Restructure agent grounding.
+- `105467b`: Update documentation with advanced Whisper settings.
+- `e3aec8e`: Apply advanced Whisper configuration and add audio research report.
+- `ae02b36`: Update agent documentation with hallucination fixes and system state.
+- `0c0fd06`: Refine audio pipeline and Whisper configuration to reduce hallucinations.
 
-| File | Changes |
-|------|---------|
-| `backend/app/main.py` | Added proxy endpoints for MJPEG, frame, HLS, WebRTC (lines 466-641) |
-| `frontend/src/lib/services/api.js` | Removed direct go2rtc access, use proxied endpoints (lines 193-263) |
-
-### Legacy Code Cleanup (Commit 7e4195c, 613113c)
-
-- Removed dead video code from `worker.py` and `stream_manager.py`
-- Legacy video endpoints in `main.py` now return 410 Gone
-- MJPEG limited to 10fps and 720p to prevent browser overload
-
-## Architecture
-
-```
-Browser (HTTPS)
-    ↓
-Reverse Proxy (nginx/traefik)
-    ↓
-TheWallflower Backend (FastAPI)
-    ↓ (proxy endpoints)
-go2rtc (internal, port 1985)
-    ↓
-RTSP Camera
-```
-
-All browser requests go through the backend API, which proxies to go2rtc internally using localhost.
-
-## Known Issues
-
-1. **WebRTC STUN/TURN**: WebRTC may need STUN/TURN server configuration for NAT traversal. Currently not configured.
-
-2. **HLS segments**: HLS proxy only handles the m3u8 playlist. Segment URLs in the playlist are relative and may need additional proxy handling.
-
-## Testing Checklist
-
-- [ ] Add new RTSP stream - should not crash browser
-- [ ] View MJPEG stream through reverse proxy
-- [ ] View HLS stream through reverse proxy
-- [ ] Test WebRTC stream (may need STUN/TURN config)
-- [ ] Verify transcription still works
-
-## Environment
-
-- Access URL: `https://thewallflower.pownet.uk`
-- go2rtc internal port: 1985
-- Docker deployment
-- Reverse proxy: External (not part of this project)
-
-## Next Steps If Issues Persist
-
-1. Check browser console for specific errors
-2. Check backend logs: `docker logs thewallflower-backend`
-3. Check go2rtc logs: `docker logs thewallflower-go2rtc` (or wherever go2rtc runs)
-4. If WebRTC fails, consider adding STUN/TURN configuration
-
-## Related Files
-
-- `agents/qa-answers.md` - Contains Q&A about the setup
-- `agents/DEVELOPMENT_PLAN_V2.md` - go2rtc refactoring plan
-- `agents/current_errors.md` - Previous error logs
+**Handoff Complete.**
