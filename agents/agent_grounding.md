@@ -42,6 +42,7 @@ graph TD
     *   **Role:** Acts as the *Control Plane* and *Signaling Proxy*.
     *   **Signaling Proxy:** The browser never talks to `go2rtc` directly (to avoid CORS/Mixed Content issues). All WebRTC offers/answers are proxied via `/api/streams/{id}/webrtc`.
     *   **Worker (worker.py):** Responsible *only* for Audio. It pulls a local RTSP stream from `go2rtc` (`rtsp://localhost:8955/...`), extracts audio via FFmpeg (16kHz, PCM S16LE), and sends it to WhisperLive. **It does not touch video.**
+        *   **Filters:** `highpass=f=200`, `lowpass=f=8000`, `aresample=async=1` (Optimized for speech, removes rumble/hiss).
     *   **SSE Heartbeat:** The system uses a 5s keepalive heartbeat for Server-Sent Events to maintain connection through reverse proxies (Nginx).
 
 3.  **go2rtc (Video Engine):**
@@ -105,6 +106,10 @@ When a user views a stream, this sequence happens:
 *   **go2rtc Config:**
     *   STUN: `stun:stun.l.google.com:19302` enabled.
     *   Log Level: `debug`.
+*   **Audio Pipeline:**
+    *   **Filters:** Bandpass (200Hz-8kHz) + Async Resample.
+    *   **Whisper:** `initial_prompt="Silence."` used to suppress hallucinations.
+    *   **Post-Processing:** Aggressive filtering of known hallucination phrases (e.g., "Subtitle by", "Thank you").
 *   **Frontend:** `WebRTCPlayer` has 3s ICE timeout.
 *   **Backend:** Enhanced logging on all proxy endpoints.
 *   **Environment Details:**
