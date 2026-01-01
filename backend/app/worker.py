@@ -521,6 +521,16 @@ class StreamWorker:
                     bufsize=10**6
                 )
                 self._ffmpeg_process = ffmpeg_process
+                
+                # Start stderr reader to prevent buffer blocking
+                self._stderr_thread = threading.Thread(
+                    target=self._read_ffmpeg_stderr,
+                    args=(ffmpeg_process,),
+                    name=f"ffmpeg-stderr-{self.config.id}",
+                    daemon=True
+                )
+                self._stderr_thread.start()
+
                 self._status.audio_connected = True
                 self._emit_status_event()
 
@@ -548,6 +558,12 @@ class StreamWorker:
             self._status.audio_connected = False
             self._ffmpeg_process = None
             self._emit_status_event()
+            
+            if self._stderr_thread and self._stderr_thread.is_alive():
+                # The thread will exit when process dies (poll() is not None)
+                self._stderr_thread.join(timeout=1.0)
+            self._stderr_thread = None
+
             if ffmpeg_process:
                 self._cleanup_ffmpeg(ffmpeg_process)
 

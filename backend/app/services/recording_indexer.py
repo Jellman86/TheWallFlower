@@ -68,6 +68,10 @@ class RecordingEventHandler(FileSystemEventHandler):
             end_time = start_time + timedelta(seconds=duration)
             file_size = path.stat().st_size
             
+            if file_size == 0:
+                logger.warning(f"Skipping empty recording file: {file_path}")
+                return
+            
             # Create DB entry
             rec = Recording(
                 stream_id=stream_id,
