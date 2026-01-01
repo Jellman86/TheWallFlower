@@ -20,6 +20,8 @@ We have implemented a multi-layered defense against "ghost" transcripts in quiet
 -   **Whisper Handshake:** Added `initial_prompt="Silence."`, `condition_on_previous_text=False`, and tuned `no_speech_threshold`/`logprob_threshold`.
 -   **Blacklist:** Expanded `HALLUCINATION_PHRASES` to catch common Whisper artifacts.
 
+**CRITICAL NOTE:** Despite these improvements, hallucinations are still being observed. The system is better but not "cured". Next steps should involve further tuning of the `no_speech_threshold` or investigating external VAD (like Silero) if the built-in WhisperLive VAD is insufficient.
+
 ### B. Agent Grounding & Documentation
 -   **Restructured `agent_grounding.md`:** Now contains explicit mandates forbidding manual container builds and explaining the mandatory CI/CD path.
 -   **Research Created:** See `RESEARCH_AUDIO_OPTIMIZATION.md` for the deep dive into `birdnet-go` patterns and WhisperLive tuning.

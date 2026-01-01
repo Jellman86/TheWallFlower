@@ -124,15 +124,9 @@ graph TD
 
 ### Audio Pipeline (Optimized for Anti-Hallucination)
 *   **Source:** `go2rtc` RTSP restream.
-*   **FFmpeg Filters:**
-    *   `highpass=f=200`: Removes rumble.
-    *   `lowpass=f=8000`: Removes hiss (Human speech focus).
-    *   `aresample=async=1`: Fixes clock drift.
-*   **Whisper Configuration:**
-    *   `initial_prompt="Silence."`: Primes model for quiet.
-    *   `condition_on_previous_text=False`: Prevents "ghost loops".
-    *   `no_speech_threshold=0.4`: Strict silence detection.
-    *   `logprob_threshold=-0.8`: Filters low-confidence garbage.
+*   **FFmpeg Filters:** Bandpass (200Hz-8kHz) + Async Resample.
+*   **Whisper Configuration:** `initial_prompt="Silence."`, `condition_on_previous_text=False`, `no_speech_threshold=0.4`.
+*   **Status:** **PERSISTENT HALLUCINATIONS.** Despite these filters, phantom speech still occurs in quiet rooms. Monitoring and further tuning required.
 *   **Ignored Phrases:** "Subtitle by", "Thank you", "The End", "Copyright".
 
 ### Video Pipeline
