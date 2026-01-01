@@ -106,26 +106,68 @@ cd /app/backend
 DB_FILE=$(echo "$DATABASE_URL" | sed 's|^sqlite:///||')
 
 if [ -f "$DB_FILE" ]; then
-    # Check for legacy schema (stream_configs exists but alembic_version does not)
-    # We use python to check because sqlite3 CLI might not be available or compatible
-    IS_LEGACY=$(python3 -c "import sqlite3, sys; 
+    # Check database state and handle various scenarios
+    DB_STATE=$(python3 -c "
+import sqlite3
 try:
-    conn=sqlite3.connect('$DB_FILE')
-    cursor=conn.cursor()
-    cursor.execute('SELECT 1 FROM alembic_version')
-    print('modern')
-except Exception:
-    try:
-        cursor.execute('SELECT 1 FROM stream_configs')
-        print('legacy')
-    except Exception:
+    conn = sqlite3.connect('$DB_FILE')
+    cursor = conn.cursor()
+
+    # Check if alembic_version exists
+    cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'\")
+    has_alembic = cursor.fetchone() is not None
+
+    # Check if stream_configs exists
+    cursor.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='stream_configs'\")
+    has_streams = cursor.fetchone() is not None
+
+    # Check if recording_enabled column exists (from NVR migration)
+    has_recording_col = False
+    if has_streams:
+        cursor.execute('PRAGMA table_info(stream_configs)')
+        columns = [row[1] for row in cursor.fetchall()]
+        has_recording_col = 'recording_enabled' in columns
+
+    if not has_streams:
         print('new')
+    elif has_alembic and has_recording_col:
+        print('modern')
+    elif has_alembic and not has_recording_col:
+        print('needs_repair')  # Stamped but missing columns
+    else:
+        print('legacy')
+
+    conn.close()
+except Exception as e:
+    print('new')
 ")
-    
-    if [ "$IS_LEGACY" = "legacy" ]; then
-        log_warn "Detected legacy database. Stamping with current schema version..."
-        alembic stamp head
-    fi
+
+    case "$DB_STATE" in
+        legacy)
+            log_warn "Detected legacy database. Stamping with initial schema version..."
+            alembic stamp 18f9bd9c8751
+            ;;
+        needs_repair)
+            log_warn "Database schema out of sync. Resetting alembic version..."
+            # Reset to initial migration so upgrade will run
+            python3 -c "
+import sqlite3
+conn = sqlite3.connect('$DB_FILE')
+cursor = conn.cursor()
+cursor.execute('DELETE FROM alembic_version')
+cursor.execute(\"INSERT INTO alembic_version (version_num) VALUES ('18f9bd9c8751')\")
+conn.commit()
+conn.close()
+print('Alembic version reset to initial migration')
+"
+            ;;
+        modern)
+            log_info "Database schema is up to date"
+            ;;
+        new)
+            log_info "New database, will create schema"
+            ;;
+    esac
 fi
 
 # Run migrations (Safe for 'modern', 'new', and just-stamped 'legacy')
