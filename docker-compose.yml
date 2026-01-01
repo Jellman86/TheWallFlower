@@ -11,7 +11,7 @@ services:
       - "${GO2RTC_RTSP_PORT:-8955}:8955"   # go2rtc RTSP server
       - "${GO2RTC_WEBRTC_PORT:-8956}:8956" # go2rtc WebRTC
     volumes:
-      - ./data:/data
+      - ${CONFIG_PATH}/thewallflower/data:/data
     environment:
       - DATABASE_URL=sqlite:////data/thewallflower.db
       - WHISPER_HOST=whisper-live
@@ -76,7 +76,6 @@ services:
     group_add:
       - "44"
       - "109"   # video group GID (use number to avoid group name issues)
-    #   - "109"   # render group GID (may vary - check with: getent group render)
     #
     # NVIDIA GPU support - uncomment for NVIDIA CUDA acceleration
     # Also set WHISPER_IMAGE=ghcr.io/collabora/whisperlive-gpu:latest
