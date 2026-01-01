@@ -24,6 +24,11 @@ class StreamConfigBase(SQLModel):
     audio_vad_onset: Optional[float] = Field(default=None)  # VAD onset sensitivity
     audio_vad_offset: Optional[float] = Field(default=None)  # VAD offset sensitivity
 
+    # Recording / NVR settings
+    recording_enabled: bool = Field(default=False)
+    recording_retention_days: int = Field(default=7)  # How many days to keep recordings
+
+
     @field_validator('rtsp_url')
     @classmethod
     def validate_rtsp_url(cls, v: str) -> str:
@@ -85,6 +90,9 @@ class StreamConfigUpdate(SQLModel):
     audio_vad_threshold: Optional[float] = None
     audio_vad_onset: Optional[float] = None
     audio_vad_offset: Optional[float] = None
+    
+    recording_enabled: Optional[bool] = None
+    recording_retention_days: Optional[int] = None
 
 
 class StreamConfigRead(StreamConfigBase):
@@ -167,3 +175,25 @@ class TranscriptCreate(SQLModel):
     is_final: bool = True
     confidence: Optional[float] = None
     speaker_id: Optional[int] = None
+
+
+# =============================================================================
+# NVR / Recording Models
+# =============================================================================
+
+class Recording(SQLModel, table=True):
+    """Video recording segment stored in database."""
+    __tablename__ = "recordings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stream_id: int = Field(foreign_key="stream_configs.id", index=True)
+    
+    start_time: datetime = Field(index=True)
+    end_time: datetime = Field(index=True)
+    duration_seconds: float
+    
+    file_path: str = Field(unique=True)  # Relative path: {stream_id}/{date}/{hour}/{file}.mp4
+    file_size_bytes: int = Field(default=0)
+    
+    retention_locked: bool = Field(default=False)  # If True, auto-cleanup will skip this
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -29,6 +29,7 @@ from app.worker import (
     ConnectionState, CircuitBreakerState
 )
 from app.workers.face_worker import FaceDetectionWorker
+from app.workers.recording_worker import RecordingWorker
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class StreamManager:
 
         self._workers: Dict[int, StreamWorker] = {}
         self._face_workers: Dict[int, FaceDetectionWorker] = {}
+        self._recording_workers: Dict[int, RecordingWorker] = {}
         self._workers_lock = threading.Lock()
         self._shutting_down = False
 
@@ -208,10 +210,16 @@ class StreamManager:
             if config.face_detection_enabled:
                 face_worker = FaceDetectionWorker(config)
 
+            # Initialize Recording Worker if enabled
+            recording_worker = None
+            if config.recording_enabled:
+                recording_worker = RecordingWorker(config)
+
         with self._workers_lock:
             if stream_id in self._workers:
                 worker = None
                 face_worker = None
+                recording_worker = None
                 return True
 
             try:
@@ -223,6 +231,11 @@ class StreamManager:
                 if face_worker:
                     face_worker.start()
                     self._face_workers[stream_id] = face_worker
+                
+                # Start Recording Worker
+                if recording_worker:
+                    recording_worker.start()
+                    self._recording_workers[stream_id] = recording_worker
                     
                 logger.info(f"Started stream {stream_id}: {stream_name}")
                 return True
@@ -235,9 +248,13 @@ class StreamManager:
         with self._workers_lock:
             worker = self._workers.pop(stream_id, None)
             face_worker = self._face_workers.pop(stream_id, None)
+            recording_worker = self._recording_workers.pop(stream_id, None)
             
         if face_worker:
             face_worker.stop()
+            
+        if recording_worker:
+            recording_worker.stop()
             
         if worker:
             worker.stop()
