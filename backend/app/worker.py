@@ -401,10 +401,13 @@ class StreamWorker:
                         "offset": 0.5,
                     },
                     "initial_prompt": "Silence.",
-                    "chunk_size": 1.0
+                    "chunk_size": 1.0,
+                    "condition_on_previous_text": False,
+                    "logprob_threshold": -0.8,
+                    "no_speech_threshold": 0.4
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent (Sensitive VAD, Float32, Prompt) for stream {self.config.id}")
+                logger.info(f"Handshake sent (Sensitive VAD, Float32, Prompt, NoContext) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
