@@ -205,14 +205,19 @@
             <div class="h-64 border-t border-[var(--color-border)] bg-[var(--color-bg-card)] flex flex-col">
                <div class="flex items-center gap-2 p-2 border-b border-[var(--color-border)]">
                  {#if !isRunning}
-                  <button onclick={handleStart} class="btn-xs bg-success">Start</button>
+                  <button onclick={handleStart} class="px-2 py-1 text-xs rounded bg-[var(--color-success)] hover:opacity-80 transition-opacity">Start</button>
                  {:else}
-                  <button onclick={handleStop} class="btn-xs bg-danger">Stop</button>
-                  <button onclick={handleRestart} class="btn-xs bg-warning">Restart</button>
+                  <button onclick={handleStop} class="px-2 py-1 text-xs rounded bg-[var(--color-danger)] hover:opacity-80 transition-opacity">Stop</button>
+                  <button onclick={handleRestart} class="px-2 py-1 text-xs rounded bg-[var(--color-warning)] hover:opacity-80 transition-opacity">Restart</button>
                  {/if}
                </div>
                <div class="flex-1 overflow-y-auto p-2">
-                 <TranscriptPanel streamId={stream.id} />
+                 <TranscriptPanel 
+                   streamId={stream.id} 
+                   streamName={stream.name} 
+                   whisperEnabled={stream.whisper_enabled}
+                   expanded={true}
+                 />
                </div>
             </div>
           </div>
