@@ -1336,3 +1336,8 @@ if frontend_path.exists():
     app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 else:
     logger.warning(f"Frontend not found at {frontend_path}, API-only mode")
+
+# Mount faces directory for thumbnails
+faces_path = Path("/data/faces")
+faces_path.mkdir(parents=True, exist_ok=True)
+app.mount("/api/faces/thumbnails", StaticFiles(directory=str(faces_path)), name="face_thumbnails")

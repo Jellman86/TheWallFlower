@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 
 from app.models import StreamConfig
-from app.services.detection.face_service import face_service
+from app.services.detection.face_service import face_service, INSIGHTFACE_AVAILABLE
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,10 @@ class FaceDetectionWorker:
     def start(self):
         """Start the face detection loop."""
         if self._is_running:
+            return
+
+        if not INSIGHTFACE_AVAILABLE:
+            logger.error(f"Cannot start face detection for stream {self.config.id}: InsightFace not installed")
             return
 
         self._is_running = True
