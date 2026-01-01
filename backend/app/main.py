@@ -208,6 +208,7 @@ async def update_stream(
     needs_restart = any(
         key in update_data for key in [
             "rtsp_url", "whisper_enabled",
+            "face_detection_enabled", "face_detection_interval",
             "audio_energy_threshold", "audio_vad_enabled",
             "audio_vad_threshold", "audio_vad_onset", "audio_vad_offset"
         ]

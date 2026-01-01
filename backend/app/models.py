@@ -12,7 +12,8 @@ class StreamConfigBase(SQLModel):
     name: str = Field(index=True)
     rtsp_url: str
     whisper_enabled: bool = Field(default=True)
-    face_detection_enabled: bool = Field(default=False)  # Future use
+    face_detection_enabled: bool = Field(default=False)
+    face_detection_interval: int = Field(default=1)  # Seconds between checks (default 1s)
     save_transcripts_to_file: bool = Field(default=False)  # Save transcripts to filesystem
     transcript_file_path: Optional[str] = Field(default=None)  # Custom path for transcripts
 
@@ -75,6 +76,7 @@ class StreamConfigUpdate(SQLModel):
     rtsp_url: Optional[str] = None
     whisper_enabled: Optional[bool] = None
     face_detection_enabled: Optional[bool] = None
+    face_detection_interval: Optional[int] = None
     save_transcripts_to_file: Optional[bool] = None
     transcript_file_path: Optional[str] = None
     # Audio tuning settings
@@ -90,6 +92,41 @@ class StreamConfigRead(StreamConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+# =============================================================================
+# Face Recognition Models
+# =============================================================================
+
+class Face(SQLModel, table=True):
+    """Known (or Unknown) face stored in the database."""
+    __tablename__ = "faces"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(default="Unknown", index=True)
+    embedding: bytes  # Serialized numpy array (float32, 512 dimensions)
+    thumbnail_path: Optional[str] = Field(default=None)
+    first_seen: datetime = Field(default_factory=datetime.utcnow)
+    last_seen: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Simple boolean to mark if this face is 'known' (named by user)
+    is_known: bool = Field(default=False)
+
+
+class FaceEvent(SQLModel, table=True):
+    """Event when a face is detected in a stream."""
+    __tablename__ = "face_events"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    stream_id: int = Field(foreign_key="stream_configs.id", index=True)
+    face_id: Optional[int] = Field(foreign_key="faces.id", default=None)
+    
+    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+    confidence: float
+    snapshot_path: Optional[str] = None  # Full frame snapshot where face was seen
+    
+    # Denormalized name for easier querying without join
+    face_name: str = "Unknown"
 
 
 # =============================================================================

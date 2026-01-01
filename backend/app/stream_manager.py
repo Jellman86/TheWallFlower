@@ -28,6 +28,7 @@ from app.worker import (
     StreamWorker, StreamStatus, TranscriptSegment,
     ConnectionState, CircuitBreakerState
 )
+from app.workers.face_worker import FaceDetectionWorker
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class StreamManager:
             return
 
         self._workers: Dict[int, StreamWorker] = {}
+        self._face_workers: Dict[int, FaceDetectionWorker] = {}
         self._workers_lock = threading.Lock()
         self._shutting_down = False
 
@@ -201,14 +203,27 @@ class StreamManager:
                 on_transcript=self._on_transcript
             )
 
+            # Initialize Face Worker if enabled
+            face_worker = None
+            if config.face_detection_enabled:
+                face_worker = FaceDetectionWorker(config)
+
         with self._workers_lock:
             if stream_id in self._workers:
                 worker = None
+                face_worker = None
                 return True
 
             try:
+                # Start Audio Worker
                 worker.start()
                 self._workers[stream_id] = worker
+                
+                # Start Face Worker
+                if face_worker:
+                    face_worker.start()
+                    self._face_workers[stream_id] = face_worker
+                    
                 logger.info(f"Started stream {stream_id}: {stream_name}")
                 return True
             except Exception as e:
@@ -219,6 +234,10 @@ class StreamManager:
     async def stop_stream(self, stream_id: int) -> bool:
         with self._workers_lock:
             worker = self._workers.pop(stream_id, None)
+            face_worker = self._face_workers.pop(stream_id, None)
+            
+        if face_worker:
+            face_worker.stop()
             
         if worker:
             worker.stop()

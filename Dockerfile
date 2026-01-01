@@ -26,6 +26,7 @@ ARG GIT_HASH=unknown
 # Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     ffmpeg \
     libgl1 \
     libglib2.0-0 \

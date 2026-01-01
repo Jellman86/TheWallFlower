@@ -497,17 +497,16 @@
             </div>
           {/if}
 
-          <label class="flex items-center gap-3 cursor-pointer opacity-50">
+          <label class="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               bind:checked={faceDetectionEnabled}
-              disabled
               class="w-4 h-4 accent-[var(--color-primary)]"
             />
             <div>
               <span class="text-sm font-medium">Enable Face Detection</span>
               <p class="text-xs text-[var(--color-text-muted)]">
-                Coming soon - Detect and identify faces
+                Detect and identify faces (1 FPS)
               </p>
             </div>
           </label>

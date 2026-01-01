@@ -12,3 +12,6 @@ numpy>=1.26.0
 torch>=2.0.0
 silero-vad>=5.1
 onnxruntime>=1.16.0
+
+# Face Detection & Recognition
+insightface>=0.7.3
