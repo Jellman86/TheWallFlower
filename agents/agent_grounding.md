@@ -1,11 +1,54 @@
-# TheWallflower - Agent Grounding & System Architecture
+# TheWallflower - Agent Grounding & Operational Manual
 
-## Core Mandate
-You are working on **TheWallflower**, a self-hosted NVR (Network Video Recorder) with real-time Speech-to-Text capabilities.
+## 1. Core Identity & Mission
+**Project:** TheWallflower
+**Type:** Self-hosted NVR (Network Video Recorder) with Real-Time Speech-to-Text.
+**Your Role:** Autonomous Developer / DevOps Agent.
+**Environment:** Linux Dev Container (Ubuntu 24.04).
 
-## System Architecture
+## 2. CRITICAL MANDATES (Read This First)
+FAILURE TO ADHERE TO THESE RULES WILL BREAK THE DEPLOYMENT PIPELINE.
 
-The system uses a **Split-Pipeline Architecture** to handle high-performance video streaming and heavy AI transcription simultaneously without blocking.
+### 🚫 NO Manual Container Builds
+*   **Do NOT** run `docker build`, `docker-compose up`, or `docker run` to deploy changes.
+*   **Reason:** This project uses a strictly enforced CI/CD pipeline via GitHub Actions. Manual containers will conflict with the orchestration and will not be persistent.
+
+### 🚫 NO Direct Host Modifications
+*   **Do NOT** modify files outside of `/config/workspace`.
+*   **Do NOT** install global system packages (`apt install`) without adding them to the `Dockerfile` first (they will vanish on rebuild).
+
+### ✅ THE ONLY Deployment Path
+1.  **Edit Code** (Standard file I/O).
+2.  **Commit Changes** (`git commit`).
+3.  **Push to Remote** (`git push`).
+4.  **Wait for CI/CD** (GitHub Actions builds the image).
+5.  **User Pulls** (User runs `docker-compose pull && docker-compose up`).
+
+---
+
+## 3. Your Toolbox & Environment
+
+### A. Environment Context
+*   **Workspace:** `/config/workspace/TheWallflower`
+*   **User:** `abc` (has `docker-sock` access).
+*   **Networking:** You are in a **sibling container** to the app. `localhost` is YOU, not the app. Access the app via DNS: `http://thewallflower:8953`.
+
+### B. Available Tools
+
+| Category | Tool | Usage / Restriction |
+| :--- | :--- | :--- |
+| **Code Editing** | `read_file`, `write_file`, `replace` | Standard operations. Always read before replacing. |
+| **Version Control** | `git` | Essential for deployment. **Use extensively.** |
+| **Docker** | `docker` | **INSPECTION ONLY.** `docker ps`, `docker logs`, `docker inspect`. Never `build`/`run`. |
+| **Networking** | `curl`, `nc`, `wget` | Use to test API endpoints and connectivity. |
+| **Media Analysis** | `ffmpeg`, `ffprobe` | Use to analyze local video files or check stream health. |
+| **Search** | `ripgrep` (`rg`), `find` | High-performance codebase search. |
+
+---
+
+## 4. System Architecture (Split-Pipeline)
+
+The system separates high-performance video streaming (`go2rtc`) from heavy AI processing (`WhisperLive`).
 
 ```mermaid
 graph TD
@@ -32,155 +75,85 @@ graph TD
     Go2RTC -- "6. WebRTC/MJPEG Video" --> User
 ```
 
-### Key Components
+### Components Detail
+1.  **Backend (FastAPI):**
+    *   **Signaling Proxy:** Proxies all WebRTC traffic (`/api/streams/{id}/webrtc`) to avoid CORS/Mixed Content.
+    *   **Audio Worker (`worker.py`):**
+        *   Connects to `go2rtc` RTSP loopback (`rtsp://localhost:8955/...`).
+        *   Extracts audio (16kHz PCM).
+        *   Sends to WhisperLive via WebSocket.
+        *   **CRITICAL:** Does not touch video processing.
 
-1.  **Frontend (Svelte 5):**
-    *   **WebRTCPlayer.svelte:** Handles the "Offer/Answer" exchange. It creates an `RTCPeerConnection`, generates an Offer, and sends it to the backend. It waits for ICE candidates (STUN) before sending to ensure connectivity behind NATs.
-    *   **StreamCard.svelte:** Wraps the player. Handles UI state (loading, error, retry). Fallback to MJPEG if WebRTC fails.
+2.  **go2rtc (Video Engine):**
+    *   Handles RTSP ingestion, WebRTC restreaming, and MSE/HLS generation.
+    *   Internal Ports: API(`8954`), RTSP(`8955`), WebRTC(`8956`).
 
-2.  **Backend (FastAPI):**
-    *   **Role:** Acts as the *Control Plane* and *Signaling Proxy*.
-    *   **Signaling Proxy:** The browser never talks to `go2rtc` directly (to avoid CORS/Mixed Content issues). All WebRTC offers/answers are proxied via `/api/streams/{id}/webrtc`.
-    *   **Worker (worker.py):** Responsible *only* for Audio. It pulls a local RTSP stream from `go2rtc` (`rtsp://localhost:8955/...`), extracts audio via FFmpeg (16kHz, PCM S16LE), and sends it to WhisperLive. **It does not touch video.**
-        *   **Filters:** `highpass=f=200`, `lowpass=f=8000`, `aresample=async=1` (Optimized for speech, removes rumble/hiss).
-    *   **SSE Heartbeat:** The system uses a 5s keepalive heartbeat for Server-Sent Events to maintain connection through reverse proxies (Nginx).
+3.  **WhisperLive (AI):**
+    *   Dedicated container/service for Faster-Whisper.
+    *   Receives audio chunks, returns JSON transcripts.
 
-3.  **go2rtc (Video Engine):**
-    *   Running inside the same container.
-    *   **Ports:** API (`8954`), RTSP (`8955`), WebRTC (`8956`). (Offset from standard Frigate ports to prevent conflicts).
-    *   **Role:** Connects to external cameras. Re-streams as WebRTC (low latency) and MJPEG (compatibility).
+---
 
-## The WebRTC Connection Flow (Debugging Context)
+## 5. Development Workflow
 
-When a user views a stream, this sequence happens:
+### Step 1: Diagnose
+*   **Logs:** `docker logs -f thewallflower` (Backend/Worker/Go2RTC logs).
+*   **API Health:** `curl http://thewallflower:8953/api/health`
+*   **Stream Status:** `curl http://thewallflower:8953/api/streams/{id}/status`
 
-1.  **Frontend:** `WebRTCPlayer` initializes `RTCPeerConnection`.
-2.  **Frontend:** Generates SDP Offer.
-3.  **Frontend:** Waits for ICE Candidates (STUN). *Critical: If this times out, connection fails.*
-4.  **Frontend:** POSTs Offer to `https://thewallflower.../api/streams/1/webrtc`.
-5.  **Backend:** Proxies request to `http://localhost:8954/api/webrtc...`.
-6.  **go2rtc:** Processes Offer, generates Answer.
-7.  **Backend:** Returns Answer to Frontend.
-8.  **Frontend:** Sets Remote Description. Video starts flowing via UDP/TCP.
+### Step 2: Implement
+*   Modify code in `/config/workspace/TheWallflower`.
+*   **Example:** Editing `worker.py` to tune audio filters.
 
-## Debugging Guide
+### Step 3: Test (Local Logic)
+*   You cannot "run" the full stack here.
+*   Verify syntax: `python -m py_compile backend/app/worker.py`.
+*   Run unit tests: `pytest backend/tests`.
 
-### Common Failure Modes
+### Step 4: Deploy
+*   `git add .`
+*   `git commit -m "Fix: ..."`
+*   `git push`
+*   *Inform the user to wait for the build.*
 
-*   **"Stream Failed" / ICE Timeout:**
-    *   **Cause:** Browser couldn't find a path to the server.
-    *   **Fix:** Check STUN settings in `WebRTCPlayer.svelte` and `docker-entrypoint.sh`. Ensure UDP ports `8956` (or range) are exposed if running outside host network mode (though Nginx usually handles TCP tunneling).
-*   **"Server Error 404/500" during negotiation:**
-    *   **Cause:** Backend can't talk to `go2rtc`.
-    *   **Check:** `docker logs thewallflower`. Look for "Connection refused" to `localhost:8954`.
-*   **Video works, Audio Transcription dead:**
-    *   **Cause:** `worker.py` failed to connect to Whisper or `go2rtc` RTSP.
-    *   **Check:** `/api/streams/{id}/status`. Look for `audio_connected: false`.
+---
 
-### Useful Commands (Inside Container) remember you cannot interact with docker directly, it must be done via testing api.
+## 6. Current System State (Live Config)
 
-*   **Check Processes:** `ps aux | grep -E "go2rtc|python"`
-*   **Check Logs:** `docker logs -f thewallflower` (Enabled `debug` level for go2rtc).
-*   **Manual Stream Check:**
-    *   Status: `curl http://localhost:8954/api/streams`
-    *   Health: `curl http://localhost:8953/api/health`
+**Date:** 2025-12-31
 
-### Test Resources
+### Audio Pipeline (Optimized for Anti-Hallucination)
+*   **Source:** `go2rtc` RTSP restream.
+*   **FFmpeg Filters:**
+    *   `highpass=f=200`: Removes rumble.
+    *   `lowpass=f=8000`: Removes hiss (Human speech focus).
+    *   `aresample=async=1`: Fixes clock drift.
+*   **Whisper Configuration:**
+    *   `initial_prompt="Silence."`: Primes model for quiet.
+    *   `condition_on_previous_text=False`: Prevents "ghost loops".
+    *   `no_speech_threshold=0.4`: Strict silence detection.
+    *   `logprob_threshold=-0.8`: Filters low-confidence garbage.
+*   **Ignored Phrases:** "Subtitle by", "Thank you", "The End", "Copyright".
 
-*   **Confirmed Working RTSP:** `rtsp://Jellman86:o7zlFClGhWL0l7@192.168.214.157/stream1`
-*   **Internal Service DNS:**
-    *   Main App: `thewallflower`
-    *   Whisper: `whisper-live`
+### Video Pipeline
+*   **Primary:** WebRTC (proxied via Backend).
+*   **Fallback:** MJPEG (limited to 10fps).
+*   **STUN:** Enabled (`stun.l.google.com:19302`).
 
-## Operational Constraints
+### Environment
+*   **External URL:** `https://thewallflower.pownet.uk/`
+*   **Reverse Proxy:** Nginx (handles SSL).
+*   **Internal Network:** Docker Bridge.
 
-*   **Connectivity:** `localhost` refers to your local agent environment, NOT the application container. You cannot connect to the app via `localhost`.
-*   **Testing:** Use Docker DNS names to interact with the API (e.g., `http://thewallflower:8953`).
-*   **Modifying Files:** Always use `read_file` before `replace`. Context is key.
-*   **Restarting:** If you modify `main.py` or `worker.py`, the changes usually auto-reload in dev mode, but a container restart is safer for deep architectural changes.
-*   **Network:** You are behind Nginx. Do not assume direct external access. Always proxy through the Backend API.
+## 7. Troubleshooting Cheat Sheet
 
-## Current System State (Dec 31, 2025)
-
-*   **WebRTC:** Enabled and primary.
-*   **go2rtc Config:**
-    *   STUN: `stun:stun.l.google.com:19302` enabled.
-    *   Log Level: `debug`.
-*   **Audio Pipeline:**
-    *   **Filters:** Bandpass (200Hz-8kHz) + Async Resample.
-    *   **Whisper:** `initial_prompt="Silence."` used to suppress hallucinations.
-    *   **Config:** `condition_on_previous_text=False` (prevents loops), `no_speech_threshold=0.4` (stricter silence detection).
-    *   **Post-Processing:** Aggressive filtering of known hallucination phrases (e.g., "Subtitle by", "Thank you").
-*   **Frontend:** `WebRTCPlayer` has 3s ICE timeout.
-*   **Backend:** Enhanced logging on all proxy endpoints.
-*   **Environment Details:**
-    *   **URL:** `https://thewallflower.pownet.uk/`
-    *   **Docker Mode:** Bridge mode.
-    *   **Access:** Local network via Nginx Reverse Proxy Manager.
-    *   **Host IP:** (Clarification needed: The internal IP of the host machine running Docker, e.g., 192.168.x.x, is often required for WebRTC candidates if STUN fails or for direct LAN access).
-
-# AI ASSISTANT GROUNDING FILE & OPERATIONAL CONTEXT
-
-## 1. SYSTEM IDENTITY & ENVIRONMENT
-You are operating inside a specialized **Dev Container** based on the `linuxserver/code-server` image.
-* **OS:** Ubuntu 24.04 LTS (Noble Numbat).
-* **Architecture:** Linux x86_64 (amd64).
-* **Locale:** UK English (`en_GB.UTF-8`).
-* **Shell:** Bash (default) and PowerShell (`pwsh`) are available.
-* **User Context:** You are likely acting as user `abc` (or `root`). The user `abc` has access to the Docker socket via the group `docker-sock`.
-
-## 2. CRITICAL PATHS & PERSISTENCE
-**WARNING:** This is an ephemeral container. Files created outside of mapped volumes will disappear if the container is recreated.
-
-* **Persistent Workspace:** `/config/workspace`. *Always verify the current working directory.*
-* **Persistent Config:** `/config`
-* **Ephemeral System:** `/usr`, `/lib`, `/etc` are reset on container rebuild.
-* **Global NPM:** `/opt/npm-global` (Built-in path).
-
-## 3. INSTALLED TOOLCHAIN
-
-### Core Runtimes
-* **Node.js:** v22.x (npm available).
-* **Python:** Python 3.x (with `pip`, `venv`).
-* **PowerShell:** Installed as `pwsh`.
-
-### Docker (Sibling Mode)
-* **Status:** Host Docker Socket mounted at `/var/run/docker.sock`.
-* **Tools:** `docker-ce-cli`, `docker-buildx-plugin`, `docker-compose-plugin`.
-* **CRITICAL CONSTRAINT:** **Only action docker commands on the developed containers (e.g., The Wallflower containers, YA-WAMF containers). Do NOT modify host system containers or this development container itself.**
-
-### AI & CLI Tools
-* **Location:** `/opt/npm-global/bin` (Added to PATH).
-* **Tools:**
-    *   `@anthropic-ai/claude-code`
-    *   `@google/gemini-cli`
-    *   `@openai/codex`
-*   **Auto-Update:** Tools are auto-updated on container boot via `/custom-cont-init.d`.
-
-### Networking & Utilities
-* **Tools:** `ping`, `nc` (netcat-openbsd), `dig`/`nslookup` (dnsutils), `ifconfig`/`netstat` (net-tools), `traceroute`, `curl`, `wget`, `jq`, `ripgrep` (`rg`), `ffmpeg`.
-
-## 4. OPERATIONAL RULES & DIRECTIVES
-
-### 1. Package Installation Strategy
-* **Project Dependencies:** Always prefer local installation (`npm install`, `pip install`) within the persistent workspace.
-* **System Tools:** If a system tool is missing, warn the user it will vanish on rebuild, or suggest adding it to the `Dockerfile`.
-
-### 2. Docker Operations
-* **Targeting:** Strictly limit Docker commands to the project containers.
-* **Networking:** Use container names for inter-container communication. Do not assume `localhost` works for sibling containers.
-
-### 3. File Editing
-* Use standard file I/O.
-* Respect `.gitignore`.
-* Be aware `/config` is volume-mounted.
-
-## 5. TROUBLESHOOTING CHEATSHEET
-* **"Docker Permission Denied":** Remind user to restart container if they just added the socket volume. The `10-setup-env` script fixes permissions on boot.
-* **"Command Not Found":** Check `$PATH`. The custom NPM path `/opt/npm-global/bin` should be there.
-* **Network Issues:** Use `nc -zv <host> <port>` to verify connectivity before assuming code is broken.
-
-## Container builds.
-- containers are build using a CD/CI pipline (github actions) you will need to push changes for the image to be built before the user can re-pull the new modified contaners
+*   **"Connection Refused" to go2rtc:**
+    *   Check if `go2rtc` binary is running inside the container: `docker exec thewallflower ps aux`.
+*   **"Stream Failed" (WebRTC):**
+    *   Check STUN configuration.
+    *   Ensure Nginx is proxying `/api/streams/.../webrtc` correctly.
+*   **"Audio Connected: False":**
+    *   Worker cannot connect to WhisperLive (`ws://whisper-live:9090`) or go2rtc RTSP.
+    *   Check `docker logs thewallflower` for "Connection refused".
 
 ## Please now read current_errors.md
