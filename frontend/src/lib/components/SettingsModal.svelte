@@ -1,9 +1,12 @@
 <script>
   import { streams, control } from '../services/api.js';
   import Icon from './Icons.svelte';
+  import AudioPreview from './AudioPreview.svelte';
+  import AudioVisualizer from './AudioVisualizer.svelte';
 
   let {
     stream = null,
+    status = null,
     isOpen = false,
     onClose = () => {},
     onSaved = () => {}
@@ -20,6 +23,23 @@
   let error = $state('');
   let testResult = $state(null);
 
+  // Audio tuning settings (null = use global defaults)
+  let showAudioTuning = $state(false);
+  let audioEnergyThreshold = $state(null);
+  let audioVadEnabled = $state(null);
+  let audioVadThreshold = $state(null);
+  let audioVadOnset = $state(null);
+  let audioVadOffset = $state(null);
+
+  // Default values for display
+  const DEFAULTS = {
+    energy_threshold: 0.015,
+    vad_enabled: true,
+    vad_threshold: 0.6,
+    vad_onset: 0.3,
+    vad_offset: 0.3,
+  };
+
   let isEditing = $derived(stream !== null);
   let title = $derived(isEditing ? 'Edit Stream' : 'Add Stream');
 
@@ -32,6 +52,15 @@
       faceDetectionEnabled = stream.face_detection_enabled || false;
       saveTranscriptsToFile = stream.save_transcripts_to_file || false;
       transcriptFilePath = stream.transcript_file_path || '';
+      // Audio tuning settings
+      audioEnergyThreshold = stream.audio_energy_threshold;
+      audioVadEnabled = stream.audio_vad_enabled;
+      audioVadThreshold = stream.audio_vad_threshold;
+      audioVadOnset = stream.audio_vad_onset;
+      audioVadOffset = stream.audio_vad_offset;
+      // Show tuning section if any custom values are set
+      showAudioTuning = audioEnergyThreshold !== null || audioVadEnabled !== null ||
+                        audioVadThreshold !== null || audioVadOnset !== null || audioVadOffset !== null;
     } else {
       name = '';
       rtspUrl = '';
@@ -39,6 +68,13 @@
       faceDetectionEnabled = false;
       saveTranscriptsToFile = false;
       transcriptFilePath = '';
+      // Reset audio tuning
+      showAudioTuning = false;
+      audioEnergyThreshold = null;
+      audioVadEnabled = null;
+      audioVadThreshold = null;
+      audioVadOnset = null;
+      audioVadOffset = null;
     }
     error = '';
     testResult = null;
@@ -96,7 +132,13 @@
         whisper_enabled: whisperEnabled,
         face_detection_enabled: faceDetectionEnabled,
         save_transcripts_to_file: saveTranscriptsToFile,
-        transcript_file_path: transcriptFilePath.trim() || null
+        transcript_file_path: transcriptFilePath.trim() || null,
+        // Audio tuning settings (null = use global defaults)
+        audio_energy_threshold: audioEnergyThreshold,
+        audio_vad_enabled: audioVadEnabled,
+        audio_vad_threshold: audioVadThreshold,
+        audio_vad_onset: audioVadOnset,
+        audio_vad_offset: audioVadOffset,
       };
 
       if (isEditing) {
@@ -140,6 +182,14 @@
     if (e.key === 'Escape') {
       onClose();
     }
+  }
+
+  function resetAudioToDefaults() {
+    audioEnergyThreshold = null;
+    audioVadEnabled = null;
+    audioVadThreshold = null;
+    audioVadOnset = null;
+    audioVadOffset = null;
   }
 </script>
 
@@ -307,6 +357,143 @@
                   </p>
                 </div>
               {/if}
+
+              <!-- Audio Tuning Section -->
+              <div class="mt-4 pt-3 border-t border-[var(--color-border)]">
+                <button
+                  type="button"
+                  onclick={() => showAudioTuning = !showAudioTuning}
+                  class="flex items-center gap-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                >
+                  <Icon name={showAudioTuning ? 'chevron-down' : 'chevron-right'} size={16} />
+                  Audio Tuning
+                  {#if audioEnergyThreshold !== null || audioVadEnabled !== null || audioVadThreshold !== null}
+                    <span class="text-xs px-1.5 py-0.5 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded">Custom</span>
+                  {/if}
+                </button>
+
+                {#if showAudioTuning}
+                  <div class="mt-3 space-y-4 p-3 bg-[var(--color-bg-dark)] rounded border border-[var(--color-border)]">
+                    
+                    {#if isEditing && stream && status?.is_running}
+                      <AudioVisualizer 
+                        streamId={stream.id}
+                        isRunning={true}
+                        energyThreshold={audioEnergyThreshold ?? DEFAULTS.energy_threshold}
+                        vadThreshold={audioVadThreshold ?? DEFAULTS.vad_threshold}
+                      />
+                    {/if}
+
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      Adjust audio filtering to reduce hallucinations. Leave blank to use global defaults.
+                    </p>
+
+                    <!-- Energy Threshold -->
+                    <div>
+                      <label class="block text-xs font-medium mb-1">
+                        Energy Threshold
+                        <span class="text-[var(--color-text-muted)]">
+                          ({audioEnergyThreshold !== null ? audioEnergyThreshold.toFixed(3) : `default: ${DEFAULTS.energy_threshold}`})
+                        </span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="0.1"
+                        step="0.005"
+                        value={audioEnergyThreshold ?? DEFAULTS.energy_threshold}
+                        oninput={(e) => audioEnergyThreshold = parseFloat(e.target.value)}
+                        class="w-full h-2 bg-[var(--color-bg-hover)] rounded-lg appearance-none cursor-pointer accent-[var(--color-primary)]"
+                      />
+                      <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                        Skip audio below this RMS level. Higher = more filtering.
+                      </p>
+                    </div>
+
+                    <!-- VAD Enabled -->
+                    <label class="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={audioVadEnabled ?? DEFAULTS.vad_enabled}
+                        onchange={(e) => audioVadEnabled = e.target.checked}
+                        class="w-4 h-4 accent-[var(--color-primary)]"
+                      />
+                      <div>
+                        <span class="text-xs font-medium">Silero VAD</span>
+                        <span class="text-xs text-[var(--color-text-muted)] ml-1">
+                          ({audioVadEnabled !== null ? (audioVadEnabled ? 'on' : 'off') : 'default'})
+                        </span>
+                      </div>
+                    </label>
+
+                    <!-- VAD Threshold -->
+                    <div>
+                      <label class="block text-xs font-medium mb-1">
+                        VAD Threshold
+                        <span class="text-[var(--color-text-muted)]">
+                          ({audioVadThreshold !== null ? audioVadThreshold.toFixed(2) : `default: ${DEFAULTS.vad_threshold}`})
+                        </span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={audioVadThreshold ?? DEFAULTS.vad_threshold}
+                        oninput={(e) => audioVadThreshold = parseFloat(e.target.value)}
+                        class="w-full h-2 bg-[var(--color-bg-hover)] rounded-lg appearance-none cursor-pointer accent-[var(--color-primary)]"
+                      />
+                      <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                        Speech probability threshold. Higher = stricter detection.
+                      </p>
+                    </div>
+
+                    <!-- VAD Onset/Offset (collapsed) -->
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="block text-xs font-medium mb-1">VAD Onset</label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          max="0.9"
+                          step="0.05"
+                          value={audioVadOnset ?? DEFAULTS.vad_onset}
+                          oninput={(e) => audioVadOnset = parseFloat(e.target.value) || null}
+                          class="w-full px-2 py-1 text-xs bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-medium mb-1">VAD Offset</label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          max="0.9"
+                          step="0.05"
+                          value={audioVadOffset ?? DEFAULTS.vad_offset}
+                          oninput={(e) => audioVadOffset = parseFloat(e.target.value) || null}
+                          class="w-full px-2 py-1 text-xs bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- Audio Preview and Reset -->
+                    <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
+                      {#if isEditing && stream}
+                        <AudioPreview streamId={stream.id} isRunning={status?.is_running ?? false} />
+                      {:else}
+                        <span class="text-xs text-[var(--color-text-muted)]">Save stream to preview audio</span>
+                      {/if}
+                      <button
+                        type="button"
+                        onclick={resetAudioToDefaults}
+                        class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors"
+                      >
+                        Reset to defaults
+                      </button>
+                    </div>
+                  </div>
+                {/if}
+              </div>
             </div>
           {/if}
 

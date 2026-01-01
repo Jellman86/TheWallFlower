@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Version Management
 # =============================================================================
 
-BASE_VERSION = "0.2.0"
+BASE_VERSION = "0.3.0"
 
 
 def get_git_hash() -> str:
@@ -206,7 +206,11 @@ async def update_stream(
 
     # Check if we need to restart the worker
     needs_restart = any(
-        key in update_data for key in ["rtsp_url", "whisper_enabled"]
+        key in update_data for key in [
+            "rtsp_url", "whisper_enabled",
+            "audio_energy_threshold", "audio_vad_enabled",
+            "audio_vad_threshold", "audio_vad_onset", "audio_vad_offset"
+        ]
     )
 
     for key, value in update_data.items():
@@ -571,6 +575,174 @@ async def stream_frame_proxy(stream_id: int):
         raise HTTPException(status_code=502, detail="go2rtc not available")
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Timeout getting frame")
+
+
+@app.websocket("/api/streams/{stream_id}/audio-levels")
+async def stream_audio_levels(websocket: "WebSocket", stream_id: int):
+    """WebSocket endpoint for real-time audio levels (RMS, VAD)."""
+    from fastapi import WebSocket, WebSocketDisconnect
+    
+    await websocket.accept()
+    
+    worker = stream_manager.get_worker(stream_id)
+    if not worker or not worker.status.is_running:
+        await websocket.close(code=1000, reason="Stream not running")
+        return
+
+    # Create queue for levels (drop old frames if full)
+    queue = asyncio.Queue(maxsize=5)
+    worker.subscribe_audio_levels(queue)
+    
+    try:
+        while True:
+            # Get latest levels
+            data = await queue.get()
+            
+            # Send as JSON
+            await websocket.send_json(data)
+            
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    except Exception as e:
+        logger.error(f"Audio levels WebSocket error: {e}")
+    finally:
+        worker.unsubscribe_audio_levels(queue)
+
+
+@app.get("/api/streams/{stream_id}/audio-preview")
+async def stream_audio_preview(stream_id: int):
+    """Stream processed audio for preview/debugging.
+
+    Returns the audio that Whisper receives (after FFmpeg filtering and VAD).
+    Useful for tuning audio thresholds and understanding what Whisper hears.
+
+    Format: WAV audio (16kHz, mono, 16-bit PCM) streamed in chunks.
+
+    Args:
+        stream_id: Stream ID to preview audio from
+    """
+    import asyncio
+    import struct
+
+    worker = stream_manager.get_worker(stream_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    if not worker.status.is_running:
+        raise HTTPException(status_code=404, detail="Stream not running")
+
+    if not worker.status.whisper_connected:
+        raise HTTPException(status_code=404, detail="Audio not connected (Whisper disabled?)")
+
+    # Create queue for audio preview
+    audio_queue = asyncio.Queue(maxsize=10)
+    worker.enable_audio_preview(audio_queue)
+
+    def create_wav_header(sample_rate: int = 16000, bits_per_sample: int = 16, channels: int = 1) -> bytes:
+        """Create a WAV header for streaming (unknown length)."""
+        # Use max uint32 for chunk sizes to indicate streaming
+        byte_rate = sample_rate * channels * bits_per_sample // 8
+        block_align = channels * bits_per_sample // 8
+
+        header = struct.pack(
+            '<4sI4s4sIHHIIHH4sI',
+            b'RIFF',
+            0xFFFFFFFF,  # Chunk size (unknown for streaming)
+            b'WAVE',
+            b'fmt ',
+            16,  # Subchunk1Size (PCM)
+            1,   # AudioFormat (PCM)
+            channels,
+            sample_rate,
+            byte_rate,
+            block_align,
+            bits_per_sample,
+            b'data',
+            0xFFFFFFFF,  # Subchunk2Size (unknown for streaming)
+        )
+        return header
+
+    async def generate():
+        """Generate audio stream with WAV header."""
+        try:
+            # Send WAV header first
+            yield create_wav_header()
+
+            while True:
+                try:
+                    # Wait for audio data with timeout
+                    preview_data = await asyncio.wait_for(audio_queue.get(), timeout=5.0)
+
+                    # Convert Float32 audio to 16-bit PCM for WAV
+                    import numpy as np
+                    audio_bytes = preview_data["audio"]
+                    samples = np.frombuffer(audio_bytes, dtype=np.float32)
+
+                    # Clip and convert to 16-bit PCM
+                    samples = np.clip(samples, -1.0, 1.0)
+                    pcm_samples = (samples * 32767).astype(np.int16)
+
+                    yield pcm_samples.tobytes()
+
+                except asyncio.TimeoutError:
+                    # No audio for 5 seconds, keep connection alive
+                    continue
+                except Exception as e:
+                    logger.error(f"Audio preview error for stream {stream_id}: {e}")
+                    break
+        finally:
+            worker.disable_audio_preview()
+
+    return StreamingResponse(
+        generate(),
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+        }
+    )
+
+
+@app.get("/api/streams/{stream_id}/audio-config")
+def get_stream_audio_config(stream_id: int, session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Get effective audio configuration for a stream.
+
+    Returns both the per-stream settings and global defaults,
+    showing which values are being used.
+
+    Args:
+        stream_id: Stream ID to get config for
+    """
+    worker = stream_manager.get_worker(stream_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    # Get effective config from worker
+    effective = worker._get_audio_config()
+
+    # Get per-stream overrides from database
+    stream = session.get(StreamConfig, stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Stream config not found")
+
+    return {
+        "stream_id": stream_id,
+        "effective": effective,
+        "overrides": {
+            "audio_energy_threshold": stream.audio_energy_threshold,
+            "audio_vad_enabled": stream.audio_vad_enabled,
+            "audio_vad_threshold": stream.audio_vad_threshold,
+            "audio_vad_onset": stream.audio_vad_onset,
+            "audio_vad_offset": stream.audio_vad_offset,
+        },
+        "globals": {
+            "energy_threshold": float(os.getenv("AUDIO_ENERGY_THRESHOLD", "0.015")),
+            "vad_enabled": os.getenv("SILERO_VAD_ENABLED", "true").lower() in ("true", "1", "yes"),
+            "vad_threshold": float(os.getenv("SILERO_VAD_THRESHOLD", "0.6")),
+            "vad_onset": 0.3,
+            "vad_offset": 0.3,
+        }
+    }
 
 
 @app.get("/api/streams/{stream_id}/hls")

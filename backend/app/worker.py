@@ -208,6 +208,43 @@ class StreamWorker:
 
         # Reconnection tracking
         self._whisper_reconnect_attempts = 0
+
+        # Audio preview/levels support
+        # Multiple consumers can subscribe to audio levels (metadata)
+        # Only one consumer can subscribe to audio preview (raw audio + metadata)
+        self._audio_preview_queue: Optional[asyncio.Queue] = None
+        self._audio_level_queues: set[asyncio.Queue] = set()
+        self._audio_preview_enabled = False
+
+    def _get_audio_config(self) -> dict:
+        """Get effective audio config (per-stream overrides or global defaults)."""
+        return {
+            "energy_threshold": self.config.audio_energy_threshold if self.config.audio_energy_threshold is not None else ENERGY_THRESHOLD,
+            "vad_enabled": self.config.audio_vad_enabled if self.config.audio_vad_enabled is not None else SILERO_VAD_ENABLED,
+            "vad_threshold": self.config.audio_vad_threshold if self.config.audio_vad_threshold is not None else SILERO_VAD_THRESHOLD,
+            "vad_onset": self.config.audio_vad_onset if self.config.audio_vad_onset is not None else 0.3,
+            "vad_offset": self.config.audio_vad_offset if self.config.audio_vad_offset is not None else 0.3,
+        }
+
+    def enable_audio_preview(self, queue: asyncio.Queue) -> None:
+        """Enable audio preview streaming (raw audio) to the provided queue."""
+        self._audio_preview_queue = queue
+        self._audio_preview_enabled = True
+        logger.info(f"Stream {self.config.id}: Audio preview enabled")
+
+    def disable_audio_preview(self) -> None:
+        """Disable audio preview streaming."""
+        self._audio_preview_enabled = False
+        self._audio_preview_queue = None
+        logger.info(f"Stream {self.config.id}: Audio preview disabled")
+
+    def subscribe_audio_levels(self, queue: asyncio.Queue) -> None:
+        """Subscribe to audio levels (metadata only) stream."""
+        self._audio_level_queues.add(queue)
+
+    def unsubscribe_audio_levels(self, queue: asyncio.Queue) -> None:
+        """Unsubscribe from audio levels stream."""
+        self._audio_level_queues.discard(queue)
     
     def _cleanup_ffmpeg(self, process: subprocess.Popen, timeout: int = 5):
         """Clean up FFmpeg process robustly."""
@@ -453,6 +490,7 @@ class StreamWorker:
                 # - beam_size=1: Greedy decoding has lowest hallucination rate
                 # - temperature=0.0: Deterministic, no random sampling
                 # - Stricter thresholds for silence/confidence detection
+                audio_cfg = self._get_audio_config()
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
@@ -460,8 +498,8 @@ class StreamWorker:
                     "model": self.whisper_model,
                     "use_vad": True,
                     "vad_parameters": {
-                        "onset": 0.3,  # More sensitive to speech start
-                        "offset": 0.3,  # More sensitive to speech end
+                        "onset": audio_cfg["vad_onset"],
+                        "offset": audio_cfg["vad_offset"],
                     },
                     "initial_prompt": "Silence.",
                     "chunk_size": 1.0,
@@ -474,7 +512,7 @@ class StreamWorker:
                     "compression_ratio_threshold": 1.35,  # Filter repetitive outputs
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent (anti-hallucination config) for stream {self.config.id}")
+                logger.info(f"Handshake sent (vad_onset={audio_cfg['vad_onset']}, vad_offset={audio_cfg['vad_offset']}) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -519,6 +557,9 @@ class StreamWorker:
         Pre-filtering helps reduce Whisper hallucinations by:
         1. Energy gating: Skips silent chunks (RMS below threshold)
         2. Silero VAD (optional): Neural network speech detection
+
+        Audio chunks that pass filtering are also sent to the audio preview queue
+        if enabled, allowing users to hear what Whisper receives.
         """
         # 1.0s blocks (64000 bytes @ 16kHz Float32 Mono)
         chunk_size = 64000
@@ -527,12 +568,18 @@ class StreamWorker:
         chunks_skipped_vad = 0
         consecutive_silent = 0
 
+        # Get per-stream audio config (or fall back to global defaults)
+        audio_cfg = self._get_audio_config()
+        energy_threshold = audio_cfg["energy_threshold"]
+        vad_enabled = audio_cfg["vad_enabled"]
+        vad_threshold = audio_cfg["vad_threshold"]
+
         # Get Silero VAD model if enabled
-        vad_model = get_silero_vad_model() if SILERO_VAD_ENABLED else None
+        vad_model = get_silero_vad_model() if vad_enabled else None
         if vad_model:
-            logger.info(f"Stream {self.config.id}: Silero VAD enabled (threshold={SILERO_VAD_THRESHOLD})")
-        if ENERGY_THRESHOLD > 0:
-            logger.info(f"Stream {self.config.id}: Energy gating enabled (threshold={ENERGY_THRESHOLD})")
+            logger.info(f"Stream {self.config.id}: Silero VAD enabled (threshold={vad_threshold})")
+        if energy_threshold > 0:
+            logger.info(f"Stream {self.config.id}: Energy gating enabled (threshold={energy_threshold})")
 
         while not self._stop_event.is_set():
             if ffmpeg_process.poll() is not None:
@@ -553,7 +600,7 @@ class StreamWorker:
                 max_val = np.max(np.abs(samples))
 
                 # Energy gating: Skip chunks below RMS threshold
-                if ENERGY_THRESHOLD > 0 and rms < ENERGY_THRESHOLD:
+                if energy_threshold > 0 and rms < energy_threshold:
                     chunks_skipped_energy += 1
                     consecutive_silent += 1
 
@@ -563,6 +610,7 @@ class StreamWorker:
                     continue
 
                 # Silero VAD: Check for speech if model is available
+                speech_prob = None
                 if vad_model is not None:
                     try:
                         import torch
@@ -570,7 +618,7 @@ class StreamWorker:
                         audio_tensor = torch.from_numpy(samples)
                         speech_prob = vad_model(audio_tensor, 16000).item()
 
-                        if speech_prob < SILERO_VAD_THRESHOLD:
+                        if speech_prob < vad_threshold:
                             chunks_skipped_vad += 1
                             consecutive_silent += 1
                             continue
@@ -591,6 +639,34 @@ class StreamWorker:
                         f"skipped(energy)={chunks_skipped_energy}, skipped(vad)={chunks_skipped_vad}, "
                         f"RMS={rms:.4f}, Max={max_val:.4f}"
                     )
+
+                # Prepare metadata
+                meta_data = {
+                    "rms": float(rms),
+                    "max": float(max_val),
+                    "speech_prob": float(speech_prob) if speech_prob is not None else 0.0,
+                    "skipped_energy": rms < energy_threshold if energy_threshold > 0 else False,
+                    "skipped_vad": speech_prob < vad_threshold if speech_prob is not None else False,
+                }
+
+                # Broadcast to level subscribers (metadata only)
+                for q in list(self._audio_level_queues):
+                    try:
+                        q.put_nowait(meta_data)
+                    except asyncio.QueueFull:
+                        pass # Drop frames if client is slow
+
+                # Send to audio preview queue if enabled (raw audio + metadata)
+                if self._audio_preview_enabled and self._audio_preview_queue is not None:
+                    try:
+                        # Send audio data with metadata for VU meter display
+                        preview_data = {
+                            "audio": audio_chunk,
+                            **meta_data
+                        }
+                        self._audio_preview_queue.put_nowait(preview_data)
+                    except asyncio.QueueFull:
+                        pass  # Drop if queue is full (client too slow)
 
                 await ws.send(audio_chunk)
 
