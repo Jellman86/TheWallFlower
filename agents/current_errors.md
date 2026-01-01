@@ -2,7 +2,8 @@
 
 ## Resolved Issues
 - **VAD Hallucinations Fixed**: 
-    - **Method:** Added `initial_prompt="Silence."` to Whisper handshake to prime model for quiet environments.
+    - **Method:** Added `initial_prompt="Silence."` and set `condition_on_previous_text=False` to prevent context loops.
+    - **Tuning:** Lowered `no_speech_threshold` to 0.4 and set `logprob_threshold` to -0.8 to filter low-confidence noise.
     - **Filters:** Implemented Bandpass filter (200Hz-8kHz) and removed volume boost to lower noise floor.
     - **Post-Processing:** Expanded blacklist of ignored phrases (e.g., "Subtitle by", "The End").
 - **Transcription Restored**: The audio pipeline was stabilized by removing aggressive FFmpeg filters that caused numerical overflows in the Whisper backend.

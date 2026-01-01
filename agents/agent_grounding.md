@@ -109,6 +109,7 @@ When a user views a stream, this sequence happens:
 *   **Audio Pipeline:**
     *   **Filters:** Bandpass (200Hz-8kHz) + Async Resample.
     *   **Whisper:** `initial_prompt="Silence."` used to suppress hallucinations.
+    *   **Config:** `condition_on_previous_text=False` (prevents loops), `no_speech_threshold=0.4` (stricter silence detection).
     *   **Post-Processing:** Aggressive filtering of known hallucination phrases (e.g., "Subtitle by", "Thank you").
 *   **Frontend:** `WebRTCPlayer` has 3s ICE timeout.
 *   **Backend:** Enhanced logging on all proxy endpoints.
