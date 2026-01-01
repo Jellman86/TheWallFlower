@@ -254,6 +254,28 @@ export const go2rtc = {
 };
 
 /**
+ * Audio preview and configuration
+ */
+export const audio = {
+  /**
+   * Get audio preview URL (WAV stream of processed audio).
+   * Use this to hear what Whisper receives after filtering.
+   */
+  previewUrl(id) {
+    return `${BASE_URL}/streams/${id}/audio-preview`;
+  },
+
+  /**
+   * Get audio configuration for a stream.
+   * Returns effective config, per-stream overrides, and global defaults.
+   */
+  async getConfig(id) {
+    const response = await fetch(`${BASE_URL}/streams/${id}/audio-config`);
+    return handleResponse(response);
+  }
+};
+
+/**
  * Health check
  */
 export async function healthCheck() {

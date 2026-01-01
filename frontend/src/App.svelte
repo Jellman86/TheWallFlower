@@ -14,8 +14,8 @@
   let isHealthy = $state(false);
 
   // Version state
-  let version = $state("0.2.0");
-  let versionInfo = $state({ version: "0.2.0", base_version: "0.2.0", git_hash: "unknown" });
+  let version = $state("0.3.0");
+  let versionInfo = $state({ version: "0.3.0", base_version: "0.3.0", git_hash: "unknown" });
 
   // Modal state
   let showModal = $state(false);
@@ -246,6 +246,7 @@
 <!-- Settings Modal -->
 <SettingsModal
   stream={editingStream}
+  status={editingStream ? streamEvents.getStreamStatus(editingStream.id) : null}
   isOpen={showModal}
   onClose={handleModalClose}
   onSaved={handleSaved}

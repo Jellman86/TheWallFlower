@@ -16,6 +16,13 @@ class StreamConfigBase(SQLModel):
     save_transcripts_to_file: bool = Field(default=False)  # Save transcripts to filesystem
     transcript_file_path: Optional[str] = Field(default=None)  # Custom path for transcripts
 
+    # Audio tuning settings (None = use global defaults from environment)
+    audio_energy_threshold: Optional[float] = Field(default=None)  # RMS threshold for energy gating
+    audio_vad_enabled: Optional[bool] = Field(default=None)  # Enable Silero VAD
+    audio_vad_threshold: Optional[float] = Field(default=None)  # VAD speech probability threshold
+    audio_vad_onset: Optional[float] = Field(default=None)  # VAD onset sensitivity
+    audio_vad_offset: Optional[float] = Field(default=None)  # VAD offset sensitivity
+
     @field_validator('rtsp_url')
     @classmethod
     def validate_rtsp_url(cls, v: str) -> str:
@@ -68,6 +75,14 @@ class StreamConfigUpdate(SQLModel):
     rtsp_url: Optional[str] = None
     whisper_enabled: Optional[bool] = None
     face_detection_enabled: Optional[bool] = None
+    save_transcripts_to_file: Optional[bool] = None
+    transcript_file_path: Optional[str] = None
+    # Audio tuning settings
+    audio_energy_threshold: Optional[float] = None
+    audio_vad_enabled: Optional[bool] = None
+    audio_vad_threshold: Optional[float] = None
+    audio_vad_onset: Optional[float] = None
+    audio_vad_offset: Optional[float] = None
 
 
 class StreamConfigRead(StreamConfigBase):
