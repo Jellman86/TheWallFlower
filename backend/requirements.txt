@@ -8,8 +8,7 @@ websockets>=12.0
 opencv-python-headless>=4.9.0
 numpy>=1.26.0
 
-# Optional: Silero VAD for improved speech detection
-# Install these if SILERO_VAD_ENABLED=true
-# torch>=2.0.0
-# silero-vad>=5.1
-# onnxruntime>=1.16.0
+# Silero VAD for improved speech detection (reduces hallucinations)
+torch>=2.0.0
+silero-vad>=5.1
+onnxruntime>=1.16.0

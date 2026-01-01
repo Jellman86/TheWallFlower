@@ -30,9 +30,17 @@ services:
       # The IP address of your TrueNAS server (e.g., 192.168.1.50)
       # DNS names are allowed but raw IP is recommended for LAN reliability.
       - WEBRTC_ADVERTISED_IP=${WEBRTC_ADVERTISED_IP}
-      
+
       # The port mapped to 8956 (default: 8956)
       - WEBRTC_ADVERTISED_PORT=${WEBRTC_ADVERTISED_PORT:-8956}
+
+      # Audio Pre-filtering (reduces Whisper hallucinations)
+      # Energy gating: Skip chunks with RMS below threshold (0.0 = disabled)
+      - AUDIO_ENERGY_THRESHOLD=${AUDIO_ENERGY_THRESHOLD:-0.01}
+
+      # Silero VAD: Neural network voice activity detection
+      - SILERO_VAD_ENABLED=${SILERO_VAD_ENABLED:-true}
+      - SILERO_VAD_THRESHOLD=${SILERO_VAD_THRESHOLD:-0.5}
 
     depends_on:
       - whisper-live
