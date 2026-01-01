@@ -20,31 +20,42 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create recordings table
-    op.create_table('recordings',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('stream_id', sa.Integer(), nullable=False),
-    sa.Column('start_time', sa.DateTime(), nullable=False),
-    sa.Column('end_time', sa.DateTime(), nullable=False),
-    sa.Column('duration_seconds', sa.Float(), nullable=False),
-    sa.Column('file_path', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('file_size_bytes', sa.Integer(), nullable=False),
-    sa.Column('retention_locked', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['stream_id'], ['stream_configs.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('file_path')
-    )
-    op.create_index(op.f('ix_recordings_start_time'), 'recordings', ['start_time'], unique=False)
-    op.create_index(op.f('ix_recordings_end_time'), 'recordings', ['end_time'], unique=False)
-    op.create_index(op.f('ix_recordings_stream_id'), 'recordings', ['stream_id'], unique=False)
+    # Get connection to check existing schema
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = inspector.get_table_names()
 
-    # Add columns to stream_configs
+    # Create recordings table (if not exists)
+    if 'recordings' not in existing_tables:
+        op.create_table('recordings',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('stream_id', sa.Integer(), nullable=False),
+        sa.Column('start_time', sa.DateTime(), nullable=False),
+        sa.Column('end_time', sa.DateTime(), nullable=False),
+        sa.Column('duration_seconds', sa.Float(), nullable=False),
+        sa.Column('file_path', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column('file_size_bytes', sa.Integer(), nullable=False),
+        sa.Column('retention_locked', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(['stream_id'], ['stream_configs.id'], ),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('file_path')
+        )
+        op.create_index(op.f('ix_recordings_start_time'), 'recordings', ['start_time'], unique=False)
+        op.create_index(op.f('ix_recordings_end_time'), 'recordings', ['end_time'], unique=False)
+        op.create_index(op.f('ix_recordings_stream_id'), 'recordings', ['stream_id'], unique=False)
+
+    # Check existing columns in stream_configs
+    existing_columns = [col['name'] for col in inspector.get_columns('stream_configs')]
+
+    # Add columns to stream_configs (if not exist)
     # Note: SQLite doesn't support adding multiple columns in one statement easily or with server_default always behaving as expected
     # But Alembic handles it. 'server_default' is important for existing rows.
     # Boolean default=False -> 0 in SQLite
-    op.add_column('stream_configs', sa.Column('recording_enabled', sa.Boolean(), nullable=False, server_default='0'))
-    op.add_column('stream_configs', sa.Column('recording_retention_days', sa.Integer(), nullable=False, server_default='7'))
+    if 'recording_enabled' not in existing_columns:
+        op.add_column('stream_configs', sa.Column('recording_enabled', sa.Boolean(), nullable=False, server_default='0'))
+    if 'recording_retention_days' not in existing_columns:
+        op.add_column('stream_configs', sa.Column('recording_retention_days', sa.Integer(), nullable=False, server_default='7'))
 
 
 def downgrade() -> None:
