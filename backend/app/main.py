@@ -33,6 +33,7 @@ from app.stream_validator import StreamValidator, StreamMetadata, StreamErrorTyp
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
 from app.routers import debug as debug_router
+from app.routers import faces as faces_router
 
 # Configure logging
 logging.basicConfig(
@@ -132,6 +133,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(debug_router.router)
+app.include_router(faces_router.router)
 
 
 # =============================================================================

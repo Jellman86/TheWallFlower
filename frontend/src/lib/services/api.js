@@ -172,6 +172,55 @@ export const transcripts = {
 };
 
 /**
+ * Faces
+ */
+export const faces = {
+  /**
+   * List faces.
+   */
+  async list(known = null, limit = 50, offset = 0) {
+    let query = `?limit=${limit}&offset=${offset}`;
+    if (known !== null) {
+      query += `&known=${known}`;
+    }
+    const response = await fetch(`${BASE_URL}/faces${query}`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Update a face.
+   */
+  async update(id, name, isKnown) {
+    let query = [];
+    if (name !== undefined) query.push(`name=${encodeURIComponent(name)}`);
+    if (isKnown !== undefined) query.push(`is_known=${isKnown}`);
+    
+    const response = await fetch(`${BASE_URL}/faces/${id}?${query.join('&')}`, {
+      method: 'PATCH'
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Delete a face.
+   */
+  async delete(id) {
+    const response = await fetch(`${BASE_URL}/faces/${id}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(response);
+  },
+  
+  /**
+   * Get thumbnail URL.
+   */
+  thumbnailUrl(id) {
+    // Add timestamp to bust cache if needed
+    return `${API_BASE}/faces/thumbnails/${id}.jpg`;
+  }
+};
+
+/**
  * Video URLs (legacy - uses Python MJPEG streaming)
  */
 export const video = {

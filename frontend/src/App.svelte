@@ -6,6 +6,7 @@
   import SettingsModal from './lib/components/SettingsModal.svelte';
   import StatsPanel from './lib/components/StatsPanel.svelte';
   import Icon from './lib/components/Icons.svelte';
+  import Faces from './lib/pages/Faces.svelte';
 
   // State
   let streamList = $state([]);
@@ -23,6 +24,7 @@
 
   // View state
   let viewMode = $state('grid'); // 'grid' or 'focus'
+  let currentPage = $state('dashboard'); // 'dashboard' or 'faces'
   let focusedStream = $state(null);
 
   // Load streams on mount - use untrack to prevent re-runs
@@ -121,24 +123,44 @@
           </span>
         </div>
 
-        <!-- View toggle -->
-        <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden">
+        <!-- Navigation -->
+        <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden text-sm mx-4">
           <button
-            onclick={() => { viewMode = 'grid'; focusedStream = null; }}
-            class="p-2 {viewMode === 'grid' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
-            title="Grid view"
+            onclick={() => currentPage = 'dashboard'}
+            class="px-4 py-2 {currentPage === 'dashboard' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
           >
-            <Icon name="grid" size={18} />
+            <Icon name="grid" size={16} />
+            Dashboard
           </button>
           <button
-            onclick={() => viewMode = 'focus'}
-            class="p-2 {viewMode === 'focus' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
-            title="Focus view"
-            disabled={!focusedStream}
+            onclick={() => currentPage = 'faces'}
+            class="px-4 py-2 {currentPage === 'faces' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
           >
-            <Icon name="maximize" size={18} />
+            <Icon name="users" size={16} />
+            Faces
           </button>
         </div>
+
+        <!-- View toggle (only on dashboard) -->
+        {#if currentPage === 'dashboard'}
+          <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden">
+            <button
+              onclick={() => { viewMode = 'grid'; focusedStream = null; }}
+              class="p-2 {viewMode === 'grid' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
+              title="Grid view"
+            >
+              <Icon name="grid" size={18} />
+            </button>
+            <button
+              onclick={() => viewMode = 'focus'}
+              class="p-2 {viewMode === 'focus' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
+              title="Focus view"
+              disabled={!focusedStream}
+            >
+              <Icon name="maximize" size={18} />
+            </button>
+          </div>
+        {/if}
 
         <!-- Refresh button -->
         <button
@@ -171,63 +193,67 @@
         </div>
       {/if}
 
-      {#if isLoading && streamList.length === 0}
-        <div class="flex items-center justify-center h-64">
-          <div class="text-center">
-            <Icon name="refresh" size={32} class="animate-spin mx-auto mb-4 text-[var(--color-text-muted)]" />
-            <p class="text-[var(--color-text-muted)]">Loading streams...</p>
+      {#if currentPage === 'faces'}
+        <Faces />
+      {:else}
+        {#if isLoading && streamList.length === 0}
+          <div class="flex items-center justify-center h-64">
+            <div class="text-center">
+              <Icon name="refresh" size={32} class="animate-spin mx-auto mb-4 text-[var(--color-text-muted)]" />
+              <p class="text-[var(--color-text-muted)]">Loading streams...</p>
+            </div>
           </div>
-        </div>
-      {:else if streamList.length === 0}
-        <!-- Empty state -->
-        <div class="flex items-center justify-center h-64">
-          <div class="text-center">
-            <Icon name="flower" size={48} class="mx-auto mb-4 text-[var(--color-text-muted)]" />
-            <h2 class="text-xl font-semibold mb-2">No Streams Configured</h2>
-            <p class="text-[var(--color-text-muted)] mb-4">
-              Add your first RTSP camera stream to get started.
-            </p>
+        {:else if streamList.length === 0}
+          <!-- Empty state -->
+          <div class="flex items-center justify-center h-64">
+            <div class="text-center">
+              <Icon name="flower" size={48} class="mx-auto mb-4 text-[var(--color-text-muted)]" />
+              <h2 class="text-xl font-semibold mb-2">No Streams Configured</h2>
+              <p class="text-[var(--color-text-muted)] mb-4">
+                Add your first RTSP camera stream to get started.
+              </p>
+              <button
+                onclick={handleAddStream}
+                class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors mx-auto"
+              >
+                <Icon name="plus" size={18} />
+                Add Your First Stream
+              </button>
+            </div>
+          </div>
+        {:else if viewMode === 'focus' && focusedStream}
+          <!-- Focus view -->
+          <div class="mb-4">
             <button
-              onclick={handleAddStream}
-              class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors mx-auto"
+              onclick={handleExitFocus}
+              class="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             >
-              <Icon name="plus" size={18} />
-              Add Your First Stream
+              &larr; Back to grid
             </button>
           </div>
-        </div>
-      {:else if viewMode === 'focus' && focusedStream}
-        <!-- Focus view -->
-        <div class="mb-4">
-          <button
-            onclick={handleExitFocus}
-            class="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          >
-            &larr; Back to grid
-          </button>
-        </div>
-        <div class="max-w-4xl mx-auto">
-          <StreamCard
-            stream={focusedStream}
-            onEdit={handleEditStream}
-            onFocus={handleFocusStream}
-            focused={true}
-          />
-        </div>
-      {:else}
-        <!-- Stats Panel -->
-        <StatsPanel streams={streamList} />
-
-        <!-- Grid view -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {#each streamList as stream (stream.id)}
+          <div class="max-w-4xl mx-auto">
             <StreamCard
-              {stream}
+              stream={focusedStream}
               onEdit={handleEditStream}
               onFocus={handleFocusStream}
+              focused={true}
             />
-          {/each}
-        </div>
+          </div>
+        {:else}
+          <!-- Stats Panel -->
+          <StatsPanel streams={streamList} />
+
+          <!-- Grid view -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {#each streamList as stream (stream.id)}
+              <StreamCard
+                {stream}
+                onEdit={handleEditStream}
+                onFocus={handleFocusStream}
+              />
+            {/each}
+          </div>
+        {/if}
       {/if}
     </div>
   </main>
