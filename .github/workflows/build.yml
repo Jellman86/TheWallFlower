@@ -78,7 +78,7 @@ jobs:
       - name: Run tests
         run: |
           cd backend
-          python -m pytest tests/ -v || echo "No tests yet"
+          python -m pytest tests/ -v --tb=short
 
   test-frontend:
     runs-on: ubuntu-latest
@@ -94,9 +94,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd frontend
-          npm install || echo "Frontend not initialized yet"
+          npm install
 
       - name: Build frontend
         run: |
           cd frontend
-          npm run build || echo "Frontend not initialized yet"
+          npm run build

@@ -1080,13 +1080,76 @@ async def stream_events(stream_id: int):
 
 
 # =============================================================================
-# Health Check
+# Health Check & Metrics
 # =============================================================================
 
 @app.get("/api/health")
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "thewallflower"}
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    """Get system metrics and stream statistics.
+
+    Returns:
+        - uptime: Server uptime in seconds
+        - streams: Per-stream statistics including audio filtering metrics
+        - totals: Aggregate statistics across all streams
+    """
+    import time
+    from datetime import datetime
+
+    workers = stream_manager.get_all_workers()
+
+    # Collect per-stream metrics
+    stream_metrics = []
+    total_running = 0
+    total_audio_connected = 0
+    total_whisper_connected = 0
+
+    for worker in workers:
+        status = worker.status
+        stream_info = {
+            "stream_id": status.stream_id,
+            "is_running": status.is_running,
+            "audio_connected": status.audio_connected,
+            "whisper_connected": status.whisper_connected,
+            "connection_state": status.connection_state.value if status.connection_state else "unknown",
+            "ffmpeg_restarts": status.ffmpeg_restarts,
+            "whisper_reconnects": status.whisper_reconnects,
+            "last_audio_time": status.last_audio_time.isoformat() if status.last_audio_time else None,
+        }
+        stream_metrics.append(stream_info)
+
+        if status.is_running:
+            total_running += 1
+        if status.audio_connected:
+            total_audio_connected += 1
+        if status.whisper_connected:
+            total_whisper_connected += 1
+
+    # Get audio filtering config
+    from app.worker import ENERGY_THRESHOLD, SILERO_VAD_ENABLED, SILERO_VAD_THRESHOLD
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "service": "thewallflower",
+        "config": {
+            "energy_threshold": ENERGY_THRESHOLD,
+            "silero_vad_enabled": SILERO_VAD_ENABLED,
+            "silero_vad_threshold": SILERO_VAD_THRESHOLD,
+            "whisper_model": settings.whisper_model,
+        },
+        "totals": {
+            "streams_configured": len(workers),
+            "streams_running": total_running,
+            "audio_connected": total_audio_connected,
+            "whisper_connected": total_whisper_connected,
+        },
+        "streams": stream_metrics,
+    }
 
 
 # =============================================================================
