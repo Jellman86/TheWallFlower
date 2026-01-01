@@ -107,7 +107,7 @@
   <div class="bg-[var(--color-bg-card)] rounded-lg p-4 border border-[var(--color-border)]">
     <div class="flex items-center gap-3">
       <div class="p-2 {go2rtcHealthy ? 'bg-[var(--color-success)]/20' : 'bg-[var(--color-warning)]/20'} rounded-lg">
-        <Icon name="video" size={24} class="{go2rtcHealthy ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'}" />
+        <Icon name="video" size={24} class={go2rtcHealthy ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'} />
       </div>
       <div class="flex-1">
         <p class="text-2xl font-bold">

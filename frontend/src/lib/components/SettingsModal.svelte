@@ -394,7 +394,7 @@
 
                     <!-- Energy Threshold -->
                     <div>
-                      <label class="block text-xs font-medium mb-1">
+                      <label for="energy-threshold" class="block text-xs font-medium mb-1">
                         Energy Threshold
                         <span class="text-[var(--color-text-muted)]">
                           ({audioEnergyThreshold !== null ? audioEnergyThreshold.toFixed(3) : `default: ${DEFAULTS.energy_threshold}`})
@@ -402,6 +402,7 @@
                       </label>
                       <input
                         type="range"
+                        id="energy-threshold"
                         min="0"
                         max="0.1"
                         step="0.005"
@@ -432,7 +433,7 @@
 
                     <!-- VAD Threshold -->
                     <div>
-                      <label class="block text-xs font-medium mb-1">
+                      <label for="vad-threshold" class="block text-xs font-medium mb-1">
                         VAD Threshold
                         <span class="text-[var(--color-text-muted)]">
                           ({audioVadThreshold !== null ? audioVadThreshold.toFixed(2) : `default: ${DEFAULTS.vad_threshold}`})
@@ -440,6 +441,7 @@
                       </label>
                       <input
                         type="range"
+                        id="vad-threshold"
                         min="0"
                         max="1"
                         step="0.05"
@@ -455,9 +457,10 @@
                     <!-- VAD Onset/Offset (collapsed) -->
                     <div class="grid grid-cols-2 gap-3">
                       <div>
-                        <label class="block text-xs font-medium mb-1">VAD Onset</label>
+                        <label for="vad-onset" class="block text-xs font-medium mb-1">VAD Onset</label>
                         <input
                           type="number"
+                          id="vad-onset"
                           min="0.1"
                           max="0.9"
                           step="0.05"
@@ -467,9 +470,10 @@
                         />
                       </div>
                       <div>
-                        <label class="block text-xs font-medium mb-1">VAD Offset</label>
+                        <label for="vad-offset" class="block text-xs font-medium mb-1">VAD Offset</label>
                         <input
                           type="number"
+                          id="vad-offset"
                           min="0.1"
                           max="0.9"
                           step="0.05"
@@ -517,9 +521,10 @@
 
           {#if faceDetectionEnabled}
             <div class="ml-7">
-              <label class="block text-xs font-medium mb-1">Detection Interval (seconds)</label>
+              <label for="face-interval" class="block text-xs font-medium mb-1">Detection Interval (seconds)</label>
               <input
                 type="number"
+                id="face-interval"
                 min="0.5"
                 step="0.5"
                 bind:value={faceDetectionInterval}

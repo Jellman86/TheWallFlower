@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import { faces } from '../services/api.js';
   import Icon from './Icons.svelte';
 
@@ -9,8 +10,15 @@
   } = $props();
 
   let isEditing = $state(false);
-  let editName = $state(face.name);
+  let editName = $state('');
   let isLoading = $state(false);
+
+  // Sync editName with face.name when face changes or when starting edit
+  $effect(() => {
+    untrack(() => {
+      editName = face.name;
+    });
+  });
 
   async function handleSave() {
     isLoading = true;
@@ -71,7 +79,6 @@
           bind:value={editName}
           class="flex-1 min-w-0 px-2 py-1 text-sm bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded focus:border-[var(--color-primary)] focus:outline-none"
           placeholder="Name..."
-          autofocus
         />
         <button
           onclick={handleSave}
