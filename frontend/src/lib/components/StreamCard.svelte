@@ -5,7 +5,7 @@
   import WebRTCPlayer from './WebRTCPlayer.svelte';
 
   import AudioVisualizer from './AudioVisualizer.svelte';
-  import TranscriptView from './TranscriptView.svelte';
+  import TranscriptPanel from './TranscriptPanel.svelte';
   import RecordingsPanel from './RecordingsPanel.svelte';
 
   let {
@@ -212,7 +212,7 @@
                  {/if}
                </div>
                <div class="flex-1 overflow-y-auto p-2">
-                 <TranscriptView streamId={stream.id} />
+                 <TranscriptPanel streamId={stream.id} />
                </div>
             </div>
           </div>
