@@ -199,8 +199,7 @@ export const video = {
  * - Works behind any reverse proxy configuration
  *
  * go2rtc provides:
- * - WebRTC: Low-latency (<100ms) streaming
- * - MJPEG: Compatible streaming for simple viewers
+ * - WebRTC: Low-latency (<100ms) streaming (primary method)
  * - HLS: Wide compatibility streaming
  * - Frame: Single JPEG snapshot
  */
@@ -218,14 +217,6 @@ export const go2rtc = {
    */
   webrtcApiUrl(id) {
     return `${BASE_URL}/streams/${id}/webrtc`;
-  },
-
-  /**
-   * Get MJPEG stream URL.
-   * Proxied through backend API for HTTPS/reverse proxy compatibility.
-   */
-  mjpegUrl(id) {
-    return `${BASE_URL}/streams/${id}/mjpeg`;
   },
 
   /**

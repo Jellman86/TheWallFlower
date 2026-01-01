@@ -16,7 +16,9 @@ services:
       - DATABASE_URL=sqlite:////data/thewallflower.db
       - WHISPER_HOST=whisper-live
       - WHISPER_PORT=9090
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      # Model: distil-large-v3 has best hallucination resistance (2.1% lower insertion error)
+      # Fallback to base.en if OpenVINO doesn't support distil-whisper
+      - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
@@ -36,11 +38,11 @@ services:
 
       # Audio Pre-filtering (reduces Whisper hallucinations)
       # Energy gating: Skip chunks with RMS below threshold (0.0 = disabled)
-      - AUDIO_ENERGY_THRESHOLD=${AUDIO_ENERGY_THRESHOLD:-0.01}
+      - AUDIO_ENERGY_THRESHOLD=${AUDIO_ENERGY_THRESHOLD:-0.015}
 
       # Silero VAD: Neural network voice activity detection
       - SILERO_VAD_ENABLED=${SILERO_VAD_ENABLED:-true}
-      - SILERO_VAD_THRESHOLD=${SILERO_VAD_THRESHOLD:-0.5}
+      - SILERO_VAD_THRESHOLD=${SILERO_VAD_THRESHOLD:-0.6}
 
     depends_on:
       - whisper-live
@@ -58,7 +60,9 @@ services:
     ports:
       - "${WHISPER_PORT:-8957}:9090"
     environment:
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      # distil-large-v3: Best for hallucination resistance + Intel OpenVINO
+      # If model fails to load, set WHISPER_MODEL=base.en in .env
+      - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
     restart: unless-stopped
     networks:
       - default

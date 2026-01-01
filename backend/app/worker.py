@@ -82,14 +82,27 @@ def get_silero_vad_model():
         return _silero_vad_model
 
 # Common Whisper 'silence hallucinations' to ignore
+# Expanded based on 2025 "Bag of Hallucinations" research
 HALLUCINATION_PHRASES = {
+    # Original set
     "thank you.", "thank you", "you", "you.",
     "i'm sorry.", "i'm sorry",
     "thanks for watching.", "subtitle by",
     "start conversation", "the end",
     "copyright", "all rights reserved",
     "amara.org", "captions by",
-    "silence", "bye"
+    "silence", "bye",
+    # Common non-speech hallucinations (2025 research)
+    "subtitles by", "subtitled by", "captioned by",
+    "please subscribe", "thank you for watching",
+    "goodbye", "see you later", "have a nice day",
+    "bye bye", "until next time", "come back soon",
+    "[silence]", "[music]", "[applause]",
+    "the end.", "end of transmission",
+    "thanks", "ok", "sure", "from",
+    "sign up", "subscribe today", "join us",
+    "support the site", "leave a like", "click here",
+    "connection terminated", "signal lost", "standby",
 }
 
 
@@ -436,7 +449,10 @@ class StreamWorker:
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
-                # Handshake: use configured model; Standard VAD settings
+                # Handshake: Anti-hallucination optimized settings (2025 research)
+                # - beam_size=1: Greedy decoding has lowest hallucination rate
+                # - temperature=0.0: Deterministic, no random sampling
+                # - Stricter thresholds for silence/confidence detection
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
@@ -444,17 +460,21 @@ class StreamWorker:
                     "model": self.whisper_model,
                     "use_vad": True,
                     "vad_parameters": {
-                        "onset": 0.5,
-                        "offset": 0.5,
+                        "onset": 0.3,  # More sensitive to speech start
+                        "offset": 0.3,  # More sensitive to speech end
                     },
                     "initial_prompt": "Silence.",
                     "chunk_size": 1.0,
                     "condition_on_previous_text": False,
-                    "logprob_threshold": -0.8,
-                    "no_speech_threshold": 0.4
+                    # Anti-hallucination parameters
+                    "beam_size": 1,  # Greedy decoding = lowest hallucination
+                    "temperature": 0.0,  # Deterministic output
+                    "logprob_threshold": -1.0,  # Stricter confidence filtering
+                    "no_speech_threshold": 0.6,  # More conservative silence detection
+                    "compression_ratio_threshold": 1.35,  # Filter repetitive outputs
                 }
                 await ws.send(json.dumps(config_msg))
-                logger.info(f"Handshake sent (Sensitive VAD, Float32, Prompt, NoContext) for stream {self.config.id}")
+                logger.info(f"Handshake sent (anti-hallucination config) for stream {self.config.id}")
 
                 ffmpeg_process = subprocess.Popen(
                     ffmpeg_cmd,
@@ -609,13 +629,20 @@ class StreamWorker:
 
                 for seg_data in segments_to_process:
                     text = seg_data.get("text", "").strip()
-                    
+
                     # Hallucination Filter: Ignore empty, single-char, or common junk noise
                     if not text or len(text) < 2:
                         continue
-                        
+
                     # Check against common hallucinations
                     if text.lower().strip() in HALLUCINATION_PHRASES:
+                        continue
+
+                    # Confidence-based filtering: Skip low-confidence transcripts
+                    # avg_logprob < -1.0 indicates low confidence (likely hallucination)
+                    avg_logprob = seg_data.get("avg_logprob", 0.0)
+                    if avg_logprob < -1.0:
+                        logger.debug(f"Stream {self.config.id}: Skipping low-confidence transcript (logprob={avg_logprob:.2f}): {text[:50]}")
                         continue
                         
                     start_time = float(seg_data.get("start", 0.0))

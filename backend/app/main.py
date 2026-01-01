@@ -535,54 +535,8 @@ async def get_go2rtc_status() -> Dict[str, Any]:
 # Video Streaming Endpoints (Proxied through go2rtc)
 # =============================================================================
 
-@app.get("/api/streams/{stream_id}/mjpeg")
-async def stream_mjpeg_proxy(stream_id: int, fps: int = 10, height: int = 720):
-    """Proxy MJPEG stream from go2rtc.
-
-    This endpoint proxies the MJPEG stream from go2rtc so it works
-    through reverse proxies and HTTPS without mixed content issues.
-
-    Args:
-        stream_id: Stream ID to view
-        fps: Max frames per second (default 10)
-        height: Max height in pixels (default 720)
-    """
-    import httpx
-
-    worker = stream_manager.get_worker(stream_id)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Stream not found")
-
-    if not worker.status.is_running:
-        raise HTTPException(status_code=404, detail="Stream not running")
-
-    # Build go2rtc MJPEG URL (internal, localhost)
-    stream_name = f"camera_{stream_id}"
-    go2rtc_url = f"http://localhost:{settings.go2rtc_port}/api/stream.mjpeg?src={stream_name}&fps={fps}&height={height}"
-
-    logger.debug(f"Proxying MJPEG stream for stream {stream_id} to {go2rtc_url}")
-
-    async def generate():
-        try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream("GET", go2rtc_url) as response:
-                    if response.status_code != 200:
-                        logger.error(f"go2rtc returned {response.status_code} for MJPEG stream {stream_id}: {await response.aread()}")
-                        return
-
-                    logger.info(f"MJPEG stream started for stream {stream_id}")
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-        except httpx.ConnectError as e:
-            logger.error(f"Failed to connect to go2rtc for MJPEG stream {stream_id}: {e}")
-        except Exception as e:
-            logger.error(f"Error in MJPEG stream proxy for stream {stream_id}: {e}")
-
-    return StreamingResponse(
-        generate(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
-    )
-
+# Note: MJPEG endpoint removed - WebRTC is the primary streaming method.
+# MJPEG was unreliable and WebRTC provides better performance.
 
 @app.get("/api/streams/{stream_id}/frame")
 async def stream_frame_proxy(stream_id: int):
