@@ -32,8 +32,11 @@ from app.worker import StreamStatus, ConnectionState, CircuitBreakerState
 from app.stream_validator import StreamValidator, StreamMetadata, StreamErrorType
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
+from app.services.recording_indexer import recording_indexer
+from app.services.recording_service import recording_service
 from app.routers import debug as debug_router
 from app.routers import faces as faces_router
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -87,6 +90,13 @@ async def lifespan(app: FastAPI):
     logger.info("Waiting for go2rtc to settle...")
     await asyncio.sleep(5)
 
+    # Start Recording Indexer
+    try:
+        recording_indexer.start()
+        logger.info("Recording indexer started")
+    except Exception as e:
+        logger.error(f"Failed to start recording indexer: {e}")
+
     # Start all configured streams (now async)
     await stream_manager.start_all()
     logger.info("Stream manager started")
@@ -99,6 +109,13 @@ async def lifespan(app: FastAPI):
                 if not stream_manager.is_shutting_down:
                     logger.debug("Running background stream sync...")
                     await stream_manager.reload_all()
+                    
+                    # Run recording cleanup
+                    try:
+                        recording_service.delete_old_recordings()
+                    except Exception as e:
+                        logger.error(f"Recording cleanup error: {e}")
+                        
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -107,6 +124,9 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(maintenance_task())
 
     yield
+
+    # Stop recording indexer
+    recording_indexer.stop()
 
     # Stop all streams on shutdown (now async)
     await stream_manager.stop_all()
