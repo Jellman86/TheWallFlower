@@ -164,15 +164,23 @@
     {/if}
 
     <!-- Whisper indicator -->
-    {#if stream.whisper_enabled}
-      <div class="absolute top-2 right-2 z-20 pointer-events-none">
-        {#if hasWhisper}
-          <Icon name="volume" size={18} class="text-[var(--color-success)] drop-shadow-md" />
-        {:else}
-          <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)] drop-shadow-md" />
-        {/if}
-      </div>
-    {/if}
+    <div class="absolute top-2 right-2 z-20 pointer-events-none flex flex-col gap-2">
+      {#if stream.whisper_enabled}
+        <div>
+          {#if hasWhisper}
+            <Icon name="volume" size={18} class="text-[var(--color-success)] drop-shadow-md" />
+          {:else}
+            <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)] drop-shadow-md" />
+          {/if}
+        </div>
+      {/if}
+
+      {#if stream.face_detection_enabled}
+        <div title="Face Detection Active">
+          <Icon name="scan-face" size={18} class="text-[var(--color-primary)] drop-shadow-md" />
+        </div>
+      {/if}
+    </div>
   </div>
 
   <!-- Transcript area (if enabled) -->

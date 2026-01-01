@@ -44,7 +44,10 @@
     <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
     <path d="M3 22v-6h6"></path>
     <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-  {:else if name === 'volume'}
+  } else if (name === 'scan-face') {
+    // Lucide: scan-face
+    path = "M3 7V5a2 2 0 0 1 2-2h2m12 0h2a2 2 0 0 1 2 2v2m0 12v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2m4-5a4 4 0 0 1 8 0";
+  } else if (name === 'volume') {
     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
   {:else if name === 'volume-x'}

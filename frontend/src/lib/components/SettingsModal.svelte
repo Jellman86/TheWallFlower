@@ -16,6 +16,7 @@
   let rtspUrl = $state('');
   let whisperEnabled = $state(false);
   let faceDetectionEnabled = $state(false);
+  let faceDetectionInterval = $state(1);
   let saveTranscriptsToFile = $state(false);
   let transcriptFilePath = $state('');
   let isLoading = $state(false);
@@ -50,6 +51,7 @@
       rtspUrl = stream.rtsp_url || '';
       whisperEnabled = stream.whisper_enabled || false;
       faceDetectionEnabled = stream.face_detection_enabled || false;
+      faceDetectionInterval = stream.face_detection_interval || 1;
       saveTranscriptsToFile = stream.save_transcripts_to_file || false;
       transcriptFilePath = stream.transcript_file_path || '';
       // Audio tuning settings
@@ -66,6 +68,7 @@
       rtspUrl = '';
       whisperEnabled = false;
       faceDetectionEnabled = false;
+      faceDetectionInterval = 1;
       saveTranscriptsToFile = false;
       transcriptFilePath = '';
       // Reset audio tuning
@@ -131,6 +134,7 @@
         rtsp_url: rtspUrl.trim(),
         whisper_enabled: whisperEnabled,
         face_detection_enabled: faceDetectionEnabled,
+        face_detection_interval: parseInt(faceDetectionInterval) || 1,
         save_transcripts_to_file: saveTranscriptsToFile,
         transcript_file_path: transcriptFilePath.trim() || null,
         // Audio tuning settings (null = use global defaults)
@@ -506,10 +510,26 @@
             <div>
               <span class="text-sm font-medium">Enable Face Detection</span>
               <p class="text-xs text-[var(--color-text-muted)]">
-                Detect and identify faces (1 FPS)
+                Detect and identify faces
               </p>
             </div>
           </label>
+
+          {#if faceDetectionEnabled}
+            <div class="ml-7">
+              <label class="block text-xs font-medium mb-1">Detection Interval (seconds)</label>
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                bind:value={faceDetectionInterval}
+                class="w-full px-3 py-2 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded focus:border-[var(--color-primary)] focus:outline-none text-sm"
+              />
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                Time between face checks. Higher = less CPU usage.
+              </p>
+            </div>
+          {/if}
         </div>
 
         <!-- Actions -->
