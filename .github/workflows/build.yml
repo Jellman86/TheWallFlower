@@ -68,10 +68,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         run: |
           cd backend
+          # Install CPU-only PyTorch (much smaller, ~200MB vs ~2GB)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
 

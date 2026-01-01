@@ -23,7 +23,8 @@ from app.models import Face, FaceEvent
 logger = logging.getLogger(__name__)
 
 # Constants
-COSINE_THRESHOLD = 0.5  # Similarity threshold for matching faces (0.0 - 1.0)
+COSINE_THRESHOLD = 0.5  # Similarity threshold for matching known faces (0.0 - 1.0)
+UNKNOWN_DEDUP_THRESHOLD = 0.6  # Higher threshold for deduplicating unknown faces
 MODEL_NAME = "buffalo_l" # "buffalo_l" (better) or "buffalo_s" (faster)
 FACE_DB_CACHE_TTL = 60 # Seconds to cache known face embeddings in memory
 
@@ -119,32 +120,47 @@ class FaceService:
 
     def recognize_face(self, detected_face) -> Tuple[str, Optional[int], float]:
         """Identify a detected face against the database.
-        
+
         Returns:
             (name, face_id, confidence)
         """
         self._update_cache()
-        
+
         best_match_name = "Unknown"
         best_match_id = None
         max_score = 0.0
-        
-        # Calculate similarity with all known faces
+
+        # Track best unknown match separately for deduplication
+        best_unknown_id = None
+        best_unknown_score = 0.0
+
+        # Calculate similarity with all faces (known and unknown)
         target_embedding = detected_face.embedding
         target_norm = np.linalg.norm(target_embedding)
-        
+
         for known_face in self.known_faces_cache:
             known_embedding = known_face.embedding_numpy
             known_norm = np.linalg.norm(known_embedding)
-            
+
             # Cosine similarity
             score = np.dot(target_embedding, known_embedding) / (target_norm * known_norm)
-            
+
             if score > max_score:
                 max_score = score
                 if score > COSINE_THRESHOLD:
                     best_match_name = known_face.name
                     best_match_id = known_face.id
+
+            # Track best unknown match for deduplication
+            if not known_face.is_known and score > best_unknown_score:
+                best_unknown_score = score
+                best_unknown_id = known_face.id
+
+        # If no known match but strong unknown match, use that (deduplication)
+        if best_match_id is None and best_unknown_score > UNKNOWN_DEDUP_THRESHOLD:
+            best_match_id = best_unknown_id
+            best_match_name = f"Unknown-{best_unknown_id}"
+            max_score = best_unknown_score
 
         return best_match_name, best_match_id, float(max_score)
 
@@ -180,12 +196,18 @@ class FaceService:
                     session.add(new_face)
                     session.commit()
                     session.refresh(new_face)
-                    
+
                     face_id = new_face.id
-                    name = f"Unknown-{face_id}" # Temp name for display
-                    
+                    name = f"Unknown-{face_id}"  # Temp name for display
+
                     # Save thumbnail
                     self._save_thumbnail(img, face, new_face.id)
+                else:
+                    # Update last_seen for matched face (known or deduplicated unknown)
+                    matched_face = session.get(Face, face_id)
+                    if matched_face:
+                        matched_face.last_seen = datetime.now()
+                        session.add(matched_face)
 
                 # Create Event
                 event = FaceEvent(

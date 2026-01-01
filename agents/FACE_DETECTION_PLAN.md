@@ -1,9 +1,9 @@
 # Face Detection & Recognition Implementation Plan
 **Date:** 2026-01-01
-**Status:** Planning
+**Status:** **COMPLETE**
 
 ## 1. Executive Summary
-We will integrate local, privacy-focused face detection and recognition into TheWallflower. The goal is to identify "Who is at the door?" and annotate events, without relying on external cloud services.
+We have integrated local, privacy-focused face detection and recognition into TheWallflower. The goal is to identify "Who is at the door?" and annotate events, without relying on external cloud services.
 
 **Key Technologies:**
 - **Engine:** `insightface` (Python) running on ONNX Runtime.
@@ -26,88 +26,47 @@ We will integrate local, privacy-focused face detection and recognition into The
 
 ---
 
-## 3. Architecture
+## 3. Architecture (Implemented)
 
 ### A. The `FaceWorker`
-A new background thread (or process) per stream, similar to the audio `StreamWorker`.
+A background thread (`FaceDetectionWorker`) runs per stream if enabled.
 
-```python
-class FaceWorker:
-    def __init__(self, config):
-        self.model = InsightFace(name='buffalo_l')
-        self.fps = 1.0  # Limit to 1 frame per second to save CPU
-
-    def loop(self):
-        while running:
-            # 1. Fetch frame from go2rtc (localhost:8955/frame.jpeg)
-            frame = self.get_frame()
-            
-            # 2. Detect Faces
-            faces = self.model.get(frame)
-            
-            # 3. For each face:
-            for face in faces:
-                # Compare with DB embeddings
-                identity = self.recognize(face.embedding)
-                
-                # If known, log event
-                # If unknown, log "Unknown Face" event + save thumbnail
-```
+*   **Logic:**
+    1.  Fetches frames from `go2rtc` API (`http://localhost:{port}/api/frame.jpeg?src={camera}`).
+    2.  Uses `FaceService` (singleton) to detect faces using InsightFace.
+    3.  Matches embeddings against known faces in the database (Cosine Similarity > 0.5).
+    4.  Saves events to `face_events` table and thumbnails to `/data/faces/`.
 
 ### B. Database Schema (`models.py`)
 
-```python
-class Face(SQLModel, table=True):
-    id: Optional[int] = Field(primary_key=True)
-    name: str = "Unknown"
-    embedding: bytes  # Serialized numpy array (512-float)
-    thumbnail_path: str
-    created_at: datetime
-
-class FaceEvent(SQLModel, table=True):
-    id: Optional[int] = Field(primary_key=True)
-    stream_id: int
-    face_id: Optional[int] = Field(foreign_key="face.id")
-    confidence: float
-    timestamp: datetime
-    snapshot_path: str  # Full frame snapshot
-```
+*   **`Face`**: Stores known/unknown identities and their reference embedding.
+*   **`FaceEvent`**: Logs every detection with timestamp, confidence, and snapshot.
 
 ---
 
-## 4. Implementation Steps
+## 4. Implementation Steps (Completed)
 
 ### Phase 1: Dependencies & Core Logic (Backend)
-1.  Add `insightface` and `onnxruntime` to `requirements.txt`.
-2.  Update `Dockerfile` (might need system libs for cv2/onnx).
-3.  Implement `FaceService`:
-    -   Loading models (cache them).
-    -   `match_face(embedding)`: Calculate cosine similarity.
-    -   `register_face(name, embedding)`: Save to DB.
+*   [x] Added `insightface` and `onnxruntime`.
+*   [x] Implemented `FaceService` with lazy loading and caching.
 
 ### Phase 2: The Worker (Backend)
-1.  Create `app/workers/face_worker.py`.
-2.  Connect to `StreamConfig.face_detection_enabled`.
-3.  Fetch frames from `go2rtc` API (`http://localhost:{port}/api/frame.jpeg?src={camera}`).
-4.  Run inference.
+*   [x] Created `app/workers/face_worker.py`.
+*   [x] Connected to `StreamManager` lifecycle.
 
 ### Phase 3: UI Integration (Frontend)
-1.  **Settings:** Enable "Face Detection" in Stream Settings (already placeholder).
-2.  **Faces Page:** New route `/faces`.
-    -   Grid of "Unknown" faces.
-    -   Click to name -> Moves to "Known".
-3.  **Stream View:**
-    -   Show "Recent Face" pill/overlay.
+*   [x] **Settings:** "Enable Face Detection" checkbox.
+*   [x] **Faces Page:** Gallery of detected faces (`/faces`).
+*   [x] **Management:** Rename "Unknown" faces to "Known" or delete them.
 
 ---
 
 ## 5. Technical Considerations
 
 *   **CPU Usage:** Face recognition is heavy.
-    *   *Mitigation:* Limit to 0.5 - 1.0 FPS.
-    *   *Mitigation:* Use `buffalo_s` (small model) by default.
-*   **Model Storage:** InsightFace downloads models to `~/.insightface`. We need to persist this or bake it into the image.
-*   **Thread Safety:** The ONNX runtime is generally thread-safe, but we should manage the model instance carefully (singleton).
+    *   *Mitigation:* Default interval is 1.0s (configurable).
+*   **Model Storage:** InsightFace downloads models to `~/.insightface`.
+*   **Thread Safety:** `FaceService` uses a lock for model loading.
 
 ---
 

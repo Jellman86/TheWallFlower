@@ -117,10 +117,11 @@ class StreamManager:
     def _cleanup_loop(self) -> None:
         """Periodically purge old records from database."""
         from app.services.transcript_service import transcript_service
-        
+        from app.services.recording_service import recording_service
+
         # Initial wait to let system settle
         time.sleep(60)
-        
+
         while not self._shutting_down:
             try:
                 # Cleanup transcripts older than 7 days or more than 5000 per stream
@@ -128,8 +129,14 @@ class StreamManager:
             except Exception as e:
                 logger.error(f"Transcript cleanup error: {e}")
 
-            # Sleep for 12 hours
-            for _ in range(12 * 60 * 6): # 12 hours in 10s increments
+            try:
+                # Cleanup recordings older than retention policy
+                recording_service.delete_old_recordings()
+            except Exception as e:
+                logger.error(f"Recording cleanup error: {e}")
+
+            # Sleep for 1 hour (recordings need more frequent cleanup than transcripts)
+            for _ in range(60 * 6):  # 1 hour in 10s increments
                 if self._shutting_down:
                     break
                 time.sleep(10)
