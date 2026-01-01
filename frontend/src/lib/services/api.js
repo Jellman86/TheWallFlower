@@ -221,6 +221,51 @@ export const faces = {
 };
 
 /**
+ * NVR / Recordings
+ */
+export const recordings = {
+  /**
+   * List recordings for a stream within a time range.
+   * @param {number} streamId
+   * @param {Date} [start]
+   * @param {Date} [end]
+   */
+  async list(streamId, start, end) {
+    const params = new URLSearchParams();
+    if (start) params.append('start_time', start.toISOString());
+    if (end) params.append('end_time', end.toISOString());
+    
+    const response = await fetch(`${BASE_URL}/streams/${streamId}/recordings?${params}`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Get list of dates (YYYY-MM-DD) that have recordings.
+   */
+  async listDates(streamId) {
+    const response = await fetch(`${BASE_URL}/streams/${streamId}/recordings/dates`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Delete a recording.
+   */
+  async delete(id) {
+    const response = await fetch(`${BASE_URL}/recordings/${id}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Get stream URL for a recording (video/mp4).
+   */
+  streamUrl(id) {
+    return `${BASE_URL}/recordings/${id}/stream`;
+  }
+};
+
+/**
  * Video URLs (legacy - uses Python MJPEG streaming)
  */
 export const video = {

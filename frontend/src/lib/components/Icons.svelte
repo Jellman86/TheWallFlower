@@ -31,6 +31,11 @@
     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
   {:else if name === 'check'}
     <polyline points="20 6 9 17 4 12"></polyline>
+  {:else if name === 'calendar'}
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+    <line x1="16" y1="2" x2="16" y2="6"></line>
+    <line x1="8" y1="2" x2="8" y2="6"></line>
+    <line x1="3" y1="10" x2="21" y2="10"></line>
   {:else if name === 'chevron-right'}
     <polyline points="9 18 15 12 9 6"></polyline>
   {:else if name === 'chevron-down'}

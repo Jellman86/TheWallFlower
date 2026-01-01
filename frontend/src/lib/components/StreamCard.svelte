@@ -4,12 +4,24 @@
   import Icon from './Icons.svelte';
   import WebRTCPlayer from './WebRTCPlayer.svelte';
 
+  import AudioVisualizer from './AudioVisualizer.svelte';
+  import TranscriptView from './TranscriptView.svelte';
+  import RecordingsPanel from './RecordingsPanel.svelte';
+
   let {
     stream,
     onEdit = () => {},
     onFocus = () => {},
     focused = false
   } = $props();
+
+  let status = $state(streamEvents.getStreamStatus(stream.id));
+  let showRecordings = $state(false); // Tab toggle state
+
+  // Update status when it changes in store
+  $effect(() => {
+    status = streamEvents.getStreamStatus(stream.id);
+  });
 
   // Use global store for status and transcripts
   let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
@@ -103,9 +115,9 @@
   }
 </script>
 
-<div class="bg-[var(--color-bg-card)] rounded-lg overflow-hidden shadow-lg border border-[var(--color-border)] {focused ? 'col-span-2 row-span-2' : ''}">
+<div class="bg-[var(--color-bg-card)] rounded-lg overflow-hidden shadow-lg border border-[var(--color-border)] {focused ? 'col-span-full h-full flex flex-col' : ''}">
   <!-- Header -->
-  <div class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-hover)]">
+  <div class="flex items-center justify-between px-4 py-2 bg-[var(--color-bg-hover)] flex-shrink-0">
     <div class="flex items-center gap-2">
       <span class="status-dot {displayState === 'connected' ? 'connected' : displayState === 'retrying' || displayState === 'connecting' ? 'connecting' : 'disconnected'}"></span>
       <h3 class="font-medium text-sm truncate">{stream.name}</h3>
@@ -129,13 +141,15 @@
         {/if}
       </div>
       
-      <button
-        onclick={() => onFocus(stream)}
-        class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
-        title="Focus view"
-      >
-        <Icon name="maximize" size={16} />
-      </button>
+      {#if !focused}
+        <button
+          onclick={() => onFocus(stream)}
+          class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
+          title="Focus view"
+        >
+          <Icon name="maximize" size={16} />
+        </button>
+      {/if}
       <button
         onclick={() => onEdit(stream)}
         class="p-1 hover:bg-[var(--color-bg-dark)] rounded transition-colors"
@@ -146,116 +160,146 @@
     </div>
   </div>
 
-  <!-- Video Area -->
-  <div class="relative aspect-video bg-black">
-    {#if !isRunning}
-       <div class="absolute inset-0 flex items-center justify-center">
-          <div class="text-[var(--color-text-muted)] flex flex-col items-center">
-             <Icon name="stop" size={24} class="mb-2 opacity-50"/>
-             <span>Stream Stopped</span>
+  <!-- Focused View (Tabbed) -->
+  {#if focused}
+    <div class="flex-1 flex flex-col md:flex-row min-h-0 border-t border-[var(--color-border)]">
+      <!-- Sidebar / Tabs -->
+      <div class="bg-[var(--color-bg-dark)] border-b md:border-b-0 md:border-r border-[var(--color-border)] flex md:flex-col shrink-0">
+        <button
+          onclick={() => showRecordings = false}
+          class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { !showRecordings ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
+        >
+          <Icon name="video" size={18} />
+          <span class="hidden md:inline">Live</span>
+        </button>
+        
+        {#if stream.recording_enabled}
+          <button
+            onclick={() => showRecordings = true}
+            class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { showRecordings ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
+          >
+            <Icon name="calendar" size={18} />
+            <span class="hidden md:inline">Recordings</span>
+          </button>
+        {/if}
+      </div>
+
+      <div class="flex-1 overflow-hidden relative bg-black">
+        {#if showRecordings && stream.recording_enabled}
+          <div class="absolute inset-0 p-4 bg-[var(--color-bg-card)]">
+            <RecordingsPanel streamId={stream.id} />
           </div>
-       </div>
-    {:else}
-      <!-- WebRTC Player -->
-      <WebRTCPlayer
-        streamId={stream.id}
-        onStatusChange={handleWebRTCStatus}
-      />
-    {/if}
-
-    <!-- Whisper indicator -->
-    <div class="absolute top-2 right-2 z-20 pointer-events-none flex flex-col gap-2">
-      {#if stream.whisper_enabled}
-        <div>
-          {#if hasWhisper}
-            <Icon name="volume" size={18} class="text-[var(--color-success)] drop-shadow-md" />
-          {:else}
-            <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)] drop-shadow-md" />
-          {/if}
-        </div>
-      {/if}
-
-      {#if stream.face_detection_enabled}
-        <div title="Face Detection Active">
-          <Icon name="scan-face" size={18} class="text-[var(--color-primary)] drop-shadow-md" />
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Transcript area (if enabled) -->
-  {#if stream.whisper_enabled && showTranscripts}
-    <div class="transcript-box {focused ? 'h-48' : 'h-24'} overflow-y-auto p-2 bg-black/30 border-t border-[var(--color-border)]">
-      {#if transcriptList.length > 0}
-        <div class="space-y-1">
-          {#each transcriptList as transcript}
-            <div class="flex gap-2 text-xs">
-              <span class="text-[var(--color-text-muted)] font-mono flex-shrink-0">
-                {#if transcript.created_at}
-                  {new Date(transcript.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})}
-                {:else if transcript.start_time !== undefined}
-                  {Math.floor(transcript.start_time / 60).toString().padStart(2, '0')}:{Math.floor(transcript.start_time % 60).toString().padStart(2, '0')}
-                {/if}
-              </span>
-              <span class="{transcript.is_final ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] italic'}">
-                {transcript.text}
-              </span>
+        {:else}
+          <!-- LIVE VIEW -->
+          <div class="flex flex-col h-full">
+            <!-- Video Player -->
+            <div class="relative bg-black flex-1 min-h-[300px]">
+              {#if !isRunning}
+                 <div class="absolute inset-0 flex items-center justify-center">
+                    <div class="text-[var(--color-text-muted)] flex flex-col items-center">
+                       <Icon name="stop" size={36} class="mb-2 opacity-50"/>
+                       <span>Stream Stopped</span>
+                    </div>
+                 </div>
+              {:else}
+                <WebRTCPlayer streamId={stream.id} onStatusChange={handleWebRTCStatus} />
+              {/if}
             </div>
-          {/each}
-        </div>
-      {:else}
-        <p class="text-xs text-[var(--color-text-muted)] italic">Waiting for speech...</p>
-      {/if}
-    </div>
-  {/if}
 
-  <!-- Controls -->
-  <div class="flex items-center justify-between px-4 py-2 border-t border-[var(--color-border)]">
-    <div class="flex gap-2">
-      {#if !isRunning}
-        <button
-          onclick={handleStart}
-          disabled={isLoading}
-          class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-success)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
-        >
-          <Icon name="play" size={14} />
-          Start
-        </button>
-      {:else}
-        <button
-          onclick={handleStop}
-          disabled={isLoading}
-          class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-danger)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
-        >
-          <Icon name="stop" size={14} />
-          Stop
-        </button>
-        <button
-          onclick={handleRestart}
-          disabled={isLoading}
-          class="flex items-center gap-1 px-3 py-1 text-xs bg-[var(--color-warning)] hover:opacity-80 rounded transition-opacity disabled:opacity-50"
-        >
-          <Icon name="rotate" size={14} />
-          Restart
-        </button>
-      {/if}
+            <!-- Controls & Transcript -->
+            <div class="h-64 border-t border-[var(--color-border)] bg-[var(--color-bg-card)] flex flex-col">
+               <div class="flex items-center gap-2 p-2 border-b border-[var(--color-border)]">
+                 {#if !isRunning}
+                  <button onclick={handleStart} class="btn-xs bg-success">Start</button>
+                 {:else}
+                  <button onclick={handleStop} class="btn-xs bg-danger">Stop</button>
+                  <button onclick={handleRestart} class="btn-xs bg-warning">Restart</button>
+                 {/if}
+               </div>
+               <div class="flex-1 overflow-y-auto p-2">
+                 <TranscriptView streamId={stream.id} />
+               </div>
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
-    {#if stream.whisper_enabled}
-      <div class="flex gap-3">
-        <button
-          onclick={() => streamEvents.clearTranscripts(stream.id)}
-          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)] transition-colors"
-          title="Clear local transcript history"
-        >
-          Clear
-        </button>
-        <button
-          onclick={() => showTranscripts = !showTranscripts}
-          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        >
-          {showTranscripts ? 'Hide' : 'Show'} transcripts
-        </button>
+
+  {:else}
+    <!-- GRID VIEW (Legacy Card) -->
+    <div class="relative aspect-video bg-black group">
+      {#if !isRunning}
+         <div class="absolute inset-0 flex items-center justify-center">
+            <div class="text-[var(--color-text-muted)] flex flex-col items-center">
+               <Icon name="stop" size={24} class="mb-2 opacity-50"/>
+               <span>Stopped</span>
+            </div>
+         </div>
+      {:else}
+        <WebRTCPlayer
+          streamId={stream.id}
+          onStatusChange={handleWebRTCStatus}
+        />
+      {/if}
+
+      <!-- Whisper indicator -->
+      <div class="absolute top-2 right-2 z-20 pointer-events-none flex flex-col gap-2">
+        {#if stream.whisper_enabled}
+          <div>
+            {#if hasWhisper}
+              <Icon name="volume" size={18} class="text-[var(--color-success)] drop-shadow-md" />
+            {:else}
+              <Icon name="volume-x" size={18} class="text-[var(--color-text-muted)] drop-shadow-md" />
+            {/if}
+          </div>
+        {/if}
+        {#if stream.face_detection_enabled}
+          <div title="Face Detection Active">
+            <Icon name="scan-face" size={18} class="text-[var(--color-primary)] drop-shadow-md" />
+          </div>
+        {/if}
+      </div>
+
+      <!-- Click to focus overlay -->
+      <button 
+        class="absolute inset-0 w-full h-full cursor-pointer bg-transparent"
+        onclick={() => onFocus(stream)}
+        title="Click to expand"
+      ></button>
+    </div>
+
+    <!-- Transcript area (Grid View) -->
+    {#if stream.whisper_enabled && showTranscripts}
+      <div class="h-32 overflow-y-auto p-2 bg-black/30 border-t border-[var(--color-border)] text-xs">
+        {#if transcriptList.length > 0}
+          <div class="space-y-1">
+            {#each transcriptList as transcript}
+              <div class="flex gap-2">
+                <span class="text-[var(--color-text-muted)] font-mono flex-shrink-0">
+                  {new Date(transcript.created_at || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                </span>
+                <span class="{transcript.is_final ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] italic'}">
+                  {transcript.text}
+                </span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="text-[var(--color-text-muted)] italic">Waiting for speech...</p>
+        {/if}
       </div>
     {/if}
-  </div>
+
+    <!-- Grid Controls -->
+    <div class="flex items-center justify-between px-4 py-2 border-t border-[var(--color-border)] text-xs">
+      <div class="flex gap-2">
+        {#if !isRunning}
+          <button onclick={handleStart} class="text-[var(--color-success)] hover:underline">Start</button>
+        {:else}
+          <button onclick={handleStop} class="text-[var(--color-danger)] hover:underline">Stop</button>
+          <button onclick={handleRestart} class="text-[var(--color-warning)] hover:underline">Restart</button>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
