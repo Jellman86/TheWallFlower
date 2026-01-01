@@ -96,11 +96,47 @@ log_info "  WORKERS: $WORKERS"
 #     ...
 # fi
 
-# Run database migrations if needed
-log_info "Initializing database..."
-python -c "from app.db import init_db; init_db()" 2>/dev/null || {
-    log_warn "Database initialization will happen on first request"
+# Run database migrations
+log_info "Initializing database schema..."
+
+# Move to backend directory for alembic
+cd /app/backend
+
+# Check if database file exists
+DB_FILE=$(echo "$DATABASE_URL" | sed 's|^sqlite:///||')
+
+if [ -f "$DB_FILE" ]; then
+    # Check for legacy schema (stream_configs exists but alembic_version does not)
+    # We use python to check because sqlite3 CLI might not be available or compatible
+    IS_LEGACY=$(python3 -c "import sqlite3, sys; 
+try:
+    conn=sqlite3.connect('$DB_FILE')
+    cursor=conn.cursor()
+    cursor.execute('SELECT 1 FROM alembic_version')
+    print('modern')
+except Exception:
+    try:
+        cursor.execute('SELECT 1 FROM stream_configs')
+        print('legacy')
+    except Exception:
+        print('new')
+")
+    
+    if [ "$IS_LEGACY" = "legacy" ]; then
+        log_warn "Detected legacy database. Stamping with current schema version..."
+        alembic stamp head
+    fi
+fi
+
+# Run migrations (Safe for 'modern', 'new', and just-stamped 'legacy')
+log_info "Running Alembic migrations..."
+alembic upgrade head || {
+    log_error "Migration failed!"
+    exit 1
 }
+
+# Return to app root
+cd /app
 
 # =============================================================================
 # Start go2rtc for efficient video streaming
