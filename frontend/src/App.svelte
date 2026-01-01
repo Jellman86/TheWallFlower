@@ -104,46 +104,48 @@
 
 <div class="min-h-screen flex flex-col">
   <!-- Header -->
-  <header class="bg-[var(--color-bg-card)] border-b border-[var(--color-border)] px-6 py-4">
-    <div class="flex items-center justify-between max-w-7xl mx-auto">
-      <div class="flex items-center gap-3">
-        <Icon name="flower" size={28} class="text-[var(--color-primary)]" />
-        <h1 class="text-xl font-bold">TheWallflower</h1>
-        <span class="text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] px-2 py-0.5 rounded">
+  <header class="bg-[var(--color-bg-card)] border-b border-[var(--color-border)] px-4 py-3 md:px-6 md:py-4">
+    <div class="flex flex-wrap items-center justify-between max-w-7xl mx-auto gap-2 md:gap-4">
+      <div class="flex items-center gap-2 md:gap-3">
+        <Icon name="flower" size={24} class="text-[var(--color-primary)] md:w-7 md:h-7" />
+        <h1 class="text-lg md:text-xl font-bold truncate">TheWallflower</h1>
+        <span class="hidden sm:inline-block text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-hover)] px-2 py-0.5 rounded">
           NVR
         </span>
       </div>
 
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2 md:gap-4 ml-auto">
         <!-- Health indicator -->
-        <div class="flex items-center gap-2 text-sm">
+        <div class="flex items-center gap-2 text-sm" title={isHealthy ? 'Backend Connected' : 'Backend Disconnected'}>
           <span class="status-dot {isHealthy ? 'connected' : 'disconnected'}"></span>
-          <span class="text-[var(--color-text-muted)]">
+          <span class="hidden lg:inline text-[var(--color-text-muted)]">
             {isHealthy ? 'Backend Connected' : 'Backend Disconnected'}
           </span>
         </div>
 
         <!-- Navigation -->
-        <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden text-sm mx-4">
+        <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden text-sm mx-1 md:mx-4">
           <button
             onclick={() => currentPage = 'dashboard'}
-            class="px-4 py-2 {currentPage === 'dashboard' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
+            class="px-3 py-2 md:px-4 {currentPage === 'dashboard' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
+            title="Dashboard"
           >
             <Icon name="grid" size={16} />
-            Dashboard
+            <span class="hidden sm:inline">Dashboard</span>
           </button>
           <button
             onclick={() => currentPage = 'faces'}
-            class="px-4 py-2 {currentPage === 'faces' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
+            class="px-3 py-2 md:px-4 {currentPage === 'faces' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
+            title="Faces"
           >
             <Icon name="users" size={16} />
-            Faces
+            <span class="hidden sm:inline">Faces</span>
           </button>
         </div>
 
         <!-- View toggle (only on dashboard) -->
         {#if currentPage === 'dashboard'}
-          <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden">
+          <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden hidden xs:flex">
             <button
               onclick={() => { viewMode = 'grid'; focusedStream = null; }}
               class="p-2 {viewMode === 'grid' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors"
@@ -174,10 +176,11 @@
         <!-- Add stream button -->
         <button
           onclick={handleAddStream}
-          class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
+          class="flex items-center gap-2 px-3 py-2 md:px-4 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
+          title="Add Stream"
         >
           <Icon name="plus" size={18} />
-          Add Stream
+          <span class="hidden md:inline">Add Stream</span>
         </button>
       </div>
     </div>
