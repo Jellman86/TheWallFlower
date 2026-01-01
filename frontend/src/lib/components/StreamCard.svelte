@@ -1,5 +1,5 @@
 <script>
-  import { status, transcripts, control } from '../services/api.js';
+  import { status as statusApi, transcripts, control } from '../services/api.js';
   import { streamEvents } from '../stores/streamEvents.svelte.js';
   import Icon from './Icons.svelte';
   import WebRTCPlayer from './WebRTCPlayer.svelte';
@@ -15,13 +15,8 @@
     focused = false
   } = $props();
 
-  let status = $state(streamEvents.getStreamStatus(stream.id));
+  // Local state for view logic
   let showRecordings = $state(false); // Tab toggle state
-
-  // Update status when it changes in store
-  $effect(() => {
-    status = streamEvents.getStreamStatus(stream.id);
-  });
 
   // Use global store for status and transcripts
   let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
@@ -66,7 +61,7 @@
 
   async function fetchStatus() {
     try {
-      await status.get(stream.id);
+      await statusApi.get(stream.id);
     } catch (e) {
       console.error('Failed to fetch status:', e);
     }
