@@ -19,8 +19,9 @@ RUN npm run build
 # =============================================================================
 FROM python:3.11-slim
 
-# Build argument for target architecture (amd64, arm64)
+# Build arguments
 ARG TARGETARCH
+ARG GIT_HASH=unknown
 
 # Install system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -76,7 +77,8 @@ ENV DATABASE_URL="sqlite:////data/thewallflower.db" \
     GO2RTC_HOST="localhost" \
     GO2RTC_PORT="8954" \
     GO2RTC_RTSP_PORT="8955" \
-    GO2RTC_WEBRTC_PORT="8956"
+    GO2RTC_WEBRTC_PORT="8956" \
+    GIT_HASH=${GIT_HASH}
 
 # Expose ports
 # 8953: Main API

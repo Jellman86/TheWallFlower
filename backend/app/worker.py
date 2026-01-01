@@ -7,6 +7,10 @@ With go2rtc integration:
 - This worker ONLY handles audio extraction for Whisper transcription
 - Audio is extracted from go2rtc's RTSP restream (localhost:8955)
 - No OpenCV video processing - eliminates CPU overhead and browser hangs
+
+Audio Pre-filtering:
+- Energy gating: Skips silent chunks based on RMS threshold
+- Silero VAD (optional): Neural network voice activity detection
 """
 
 import asyncio
@@ -18,9 +22,10 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Callable, Dict
+from typing import List, Optional, Callable, Dict, Any
 import json
 
+import numpy as np
 import websockets
 
 from app.models import StreamConfig, TranscriptCreate
@@ -33,6 +38,48 @@ logger = logging.getLogger(__name__)
 WHISPER_RECONNECT_BACKOFF = [1, 2, 5, 10, 30, 60]  # seconds
 FFMPEG_RESTART_DELAY = 2  # seconds
 THREAD_HEALTH_CHECK_INTERVAL = 10  # seconds
+
+# Audio pre-filtering configuration
+# Energy gating: Skip chunks with RMS below this threshold (0.0 = disabled)
+ENERGY_THRESHOLD = float(os.getenv("AUDIO_ENERGY_THRESHOLD", "0.01"))
+# Silero VAD: Enable neural network VAD for more accurate speech detection
+SILERO_VAD_ENABLED = os.getenv("SILERO_VAD_ENABLED", "false").lower() in ("true", "1", "yes")
+SILERO_VAD_THRESHOLD = float(os.getenv("SILERO_VAD_THRESHOLD", "0.5"))
+
+# Lazy-loaded Silero VAD model (shared across workers)
+_silero_vad_model = None
+_silero_vad_lock = threading.Lock()
+
+
+def get_silero_vad_model():
+    """Get or initialize the Silero VAD model (thread-safe singleton)."""
+    global _silero_vad_model
+    if not SILERO_VAD_ENABLED:
+        return None
+
+    with _silero_vad_lock:
+        if _silero_vad_model is None:
+            try:
+                import torch
+                torch.set_num_threads(1)  # Optimize for single-threaded use
+
+                # Try the silero-vad package first (recommended)
+                try:
+                    from silero_vad import load_silero_vad
+                    _silero_vad_model = load_silero_vad(onnx=True)
+                    logger.info("Silero VAD loaded successfully (silero-vad package, ONNX)")
+                except ImportError:
+                    # Fallback to PyTorch Hub
+                    _silero_vad_model, _ = torch.hub.load(
+                        repo_or_dir='snakers4/silero-vad',
+                        model='silero_vad',
+                        force_reload=False
+                    )
+                    logger.info("Silero VAD loaded successfully (PyTorch Hub)")
+            except Exception as e:
+                logger.error(f"Failed to load Silero VAD: {e}")
+                _silero_vad_model = None
+        return _silero_vad_model
 
 # Common Whisper 'silence hallucinations' to ignore
 HALLUCINATION_PHRASES = {
@@ -447,10 +494,25 @@ class StreamWorker:
                 self._cleanup_ffmpeg(ffmpeg_process)
 
     async def _send_audio(self, ws, ffmpeg_process: subprocess.Popen) -> None:
-        """Send audio chunks to WhisperLive with diagnostic sampling."""
+        """Send audio chunks to WhisperLive with energy gating and optional Silero VAD.
+
+        Pre-filtering helps reduce Whisper hallucinations by:
+        1. Energy gating: Skips silent chunks (RMS below threshold)
+        2. Silero VAD (optional): Neural network speech detection
+        """
         # 1.0s blocks (64000 bytes @ 16kHz Float32 Mono)
-        chunk_size = 64000 
+        chunk_size = 64000
         chunks_sent = 0
+        chunks_skipped_energy = 0
+        chunks_skipped_vad = 0
+        consecutive_silent = 0
+
+        # Get Silero VAD model if enabled
+        vad_model = get_silero_vad_model() if SILERO_VAD_ENABLED else None
+        if vad_model:
+            logger.info(f"Stream {self.config.id}: Silero VAD enabled (threshold={SILERO_VAD_THRESHOLD})")
+        if ENERGY_THRESHOLD > 0:
+            logger.info(f"Stream {self.config.id}: Energy gating enabled (threshold={ENERGY_THRESHOLD})")
 
         while not self._stop_event.is_set():
             if ffmpeg_process.poll() is not None:
@@ -461,15 +523,57 @@ class StreamWorker:
                 if not audio_chunk:
                     break
 
+                # Convert to numpy for analysis
+                samples = np.frombuffer(audio_chunk, dtype=np.float32)
+                if len(samples) == 0:
+                    continue
+
+                # Calculate RMS energy
+                rms = np.sqrt(np.mean(samples ** 2))
+                max_val = np.max(np.abs(samples))
+
+                # Energy gating: Skip chunks below RMS threshold
+                if ENERGY_THRESHOLD > 0 and rms < ENERGY_THRESHOLD:
+                    chunks_skipped_energy += 1
+                    consecutive_silent += 1
+
+                    # Log occasionally when silent
+                    if consecutive_silent == 30:  # 30 seconds of silence
+                        logger.debug(f"Stream {self.config.id}: 30s of silence (RMS={rms:.4f})")
+                    continue
+
+                # Silero VAD: Check for speech if model is available
+                if vad_model is not None:
+                    try:
+                        import torch
+                        # Silero expects normalized audio tensor
+                        audio_tensor = torch.from_numpy(samples)
+                        speech_prob = vad_model(audio_tensor, 16000).item()
+
+                        if speech_prob < SILERO_VAD_THRESHOLD:
+                            chunks_skipped_vad += 1
+                            consecutive_silent += 1
+                            continue
+                    except Exception as e:
+                        # If VAD fails, fall through and send audio anyway
+                        if chunks_sent == 0:
+                            logger.warning(f"Stream {self.config.id}: Silero VAD error (continuing without VAD): {e}")
+
+                # Reset silence counter when we send audio
+                consecutive_silent = 0
                 chunks_sent += 1
-                if chunks_sent % 30 == 1: # Log every 30 seconds
-                    import numpy as np
-                    samples = np.frombuffer(audio_chunk, dtype=np.float32)
-                    max_val = np.max(np.abs(samples)) if len(samples) > 0 else 0
-                    logger.info(f"Stream {self.config.id} Audio Probe (F32): Chunk={chunks_sent}, Max Amplitude={max_val:.4f}")
+
+                # Log diagnostics every 30 chunks sent (not 30 total processed)
+                if chunks_sent % 30 == 1:
+                    total_processed = chunks_sent + chunks_skipped_energy + chunks_skipped_vad
+                    logger.info(
+                        f"Stream {self.config.id} Audio: sent={chunks_sent}, "
+                        f"skipped(energy)={chunks_skipped_energy}, skipped(vad)={chunks_skipped_vad}, "
+                        f"RMS={rms:.4f}, Max={max_val:.4f}"
+                    )
 
                 await ws.send(audio_chunk)
-                
+
                 with self._status_lock:
                     self._status.last_audio_time = datetime.now()
 
@@ -478,6 +582,15 @@ class StreamWorker:
                 break
 
             await asyncio.sleep(0.01)
+
+        # Final stats
+        total = chunks_sent + chunks_skipped_energy + chunks_skipped_vad
+        if total > 0:
+            logger.info(
+                f"Stream {self.config.id} Audio session ended: "
+                f"sent={chunks_sent} ({100*chunks_sent/total:.1f}%), "
+                f"filtered(energy)={chunks_skipped_energy}, filtered(vad)={chunks_skipped_vad}"
+            )
 
     async def _receive_transcripts(self, ws) -> None:
         """Receive transcripts from WhisperLive and persist to database."""

@@ -269,3 +269,18 @@ export async function healthCheck() {
   const response = await fetch(`${BASE_URL}/health`);
   return handleResponse(response);
 }
+
+/**
+ * Version info
+ */
+export async function fetchVersion() {
+  try {
+    const response = await fetch(`${BASE_URL}/version`);
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch {
+    // Ignore errors - return fallback
+  }
+  return { version: "0.2.0", base_version: "0.2.0", git_hash: "unknown" };
+}

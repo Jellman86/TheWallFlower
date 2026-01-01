@@ -1,6 +1,6 @@
 <script>
   import { untrack } from 'svelte';
-  import { streams, healthCheck } from './lib/services/api.js';
+  import { streams, healthCheck, fetchVersion } from './lib/services/api.js';
   import { streamEvents } from './lib/stores/streamEvents.svelte.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
@@ -12,6 +12,10 @@
   let isLoading = $state(true);
   let error = $state('');
   let isHealthy = $state(false);
+
+  // Version state
+  let version = $state("0.2.0");
+  let versionInfo = $state({ version: "0.2.0", base_version: "0.2.0", git_hash: "unknown" });
 
   // Modal state
   let showModal = $state(false);
@@ -29,6 +33,7 @@
       untrack(() => {
         loadStreams();
         checkHealth();
+        loadVersion();
         streamEvents.connect();
       });
 
@@ -37,6 +42,13 @@
       };
     }
   });
+
+  async function loadVersion() {
+    const info = await fetchVersion();
+    versionInfo = info;
+    // Show clean version - hide "+unknown" suffix if git hash isn't available
+    version = info.git_hash === "unknown" ? info.base_version : info.version;
+  }
 
   async function checkHealth() {
     try {
@@ -223,7 +235,9 @@
   <!-- Footer -->
   <footer class="bg-[var(--color-bg-card)] border-t border-[var(--color-border)] px-6 py-3">
     <div class="max-w-7xl mx-auto flex items-center justify-between text-sm text-[var(--color-text-muted)]">
-      <span>TheWallflower v0.1.0</span>
+      <span title={versionInfo.git_hash !== "unknown" ? `Git: ${versionInfo.git_hash}` : ""}>
+        TheWallflower v{version}
+      </span>
       <span>{streamList.length} stream{streamList.length !== 1 ? 's' : ''} configured</span>
     </div>
   </footer>

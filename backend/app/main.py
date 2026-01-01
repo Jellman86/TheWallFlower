@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -39,6 +40,40 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Version Management
+# =============================================================================
+
+BASE_VERSION = "0.2.0"
+
+
+def get_git_hash() -> str:
+    """Get git commit hash from environment or by running git."""
+    # First check environment variable (set during Docker build)
+    git_hash = os.environ.get('GIT_HASH', '').strip()
+    if git_hash:
+        return git_hash
+
+    # Try to get from git command (for development)
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+    return "unknown"
+
+
+GIT_HASH = get_git_hash()
+APP_VERSION = f"{BASE_VERSION}+{GIT_HASH}" if GIT_HASH != "unknown" else BASE_VERSION
 
 
 @asynccontextmanager
@@ -80,7 +115,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TheWallflower",
     description="Self-hosted NVR with real-time Speech-to-Text",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -97,6 +132,20 @@ app.add_middleware(
 
 # Include routers
 app.include_router(debug_router.router)
+
+
+# =============================================================================
+# Version Endpoint
+# =============================================================================
+
+@app.get("/api/version")
+async def get_version():
+    """Return the application version info."""
+    return {
+        "version": APP_VERSION,
+        "base_version": BASE_VERSION,
+        "git_hash": GIT_HASH
+    }
 
 
 # =============================================================================
