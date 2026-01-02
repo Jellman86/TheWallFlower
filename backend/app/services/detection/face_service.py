@@ -6,6 +6,7 @@ import threading
 import numpy as np
 import cv2
 import pickle
+import time
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict
 from sqlmodel import Session, select
@@ -199,65 +200,64 @@ class FaceService:
         detected_faces = self.detect_faces(img)
         events = []
         
+        # Use one session for the entire frame processing
         with Session(engine) as session:
-            for face in detected_faces:
-                name, face_id, confidence = self.recognize_face(face)
-                
-                # If unknown and high quality detection, maybe register it as a new "Unknown" face?
-                # For now, we only log events. Auto-registration logic can be complex (deduplication).
-                # Implementation: If unknown, we create a new 'Unknown' Face entry to track it.
-                
-                if face_id is None:
-                    # Create new Unknown face
-                    new_face = Face(
-                        name="Unknown",
-                        embedding=pickle.dumps(face.embedding),
-                        is_known=False
-                    )
-                    session.add(new_face)
-                    session.commit()
-                    session.refresh(new_face)
-
-                    face_id = new_face.id
-                    name = f"Unknown-{face_id}"  # Temp name for display
-
-                    # Save thumbnail
-                    self._save_thumbnail(img, face, face_id)
+            try:
+                for face in detected_faces:
+                    name, face_id, confidence = self.recognize_face(face)
                     
-                    # Save initial embedding
-                    self._save_face_embedding(face_id, face.embedding, img, face)
-                else:
-                    # Update last_seen for matched face (known or deduplicated unknown)
-                    matched_face = session.get(Face, face_id)
-                    if matched_face:
-                        matched_face.last_seen = datetime.now()
-                        
-                        # If face missing thumbnail (e.g. due to previous errors), save it now
-                        if not matched_face.thumbnail_path:
-                            self._save_thumbnail(img, face, face_id)
-                            
-                        session.add(matched_face)
-                        
-                        # Save this embedding too to improve recognition over time (limit to 50 per face)
-                        if matched_face.embedding_count < 50:
-                            self._save_face_embedding(face_id, face.embedding, img, face)
+                    db_face = None
+                    if face_id is None:
+                        # Create new Unknown face
+                        db_face = Face(
+                            name="Unknown",
+                            embedding=pickle.dumps(face.embedding),
+                            is_known=False
+                        )
+                        session.add(db_face)
+                        session.flush() # Get ID without committing
+                        face_id = db_face.id
+                        name = f"Unknown-{face_id}"
+                    else:
+                        db_face = session.get(Face, face_id)
+                        if db_face:
+                            db_face.last_seen = datetime.now()
+                            session.add(db_face)
 
-                # Save event snapshot (the full frame)
-                snapshot_filename = f"event_{int(datetime.now().timestamp())}_{face_id}.jpg"
-                snapshot_path = self._save_snapshot(img, snapshot_filename)
+                    if db_face:
+                        # Save thumbnail if missing
+                        if not db_face.thumbnail_path:
+                            path = self._save_thumbnail_file(img, face, face_id)
+                            if path:
+                                db_face.thumbnail_path = path
+                                session.add(db_face)
+                        
+                        # Save embedding (limit to 50)
+                        if db_face.embedding_count < 50:
+                            # We still save embeddings separately but linked by ID
+                            self._save_face_embedding_data(session, face_id, face.embedding, img, face)
+                            # Update face stats (embedding_count and avg_embedding are updated in _save_face_embedding_data)
 
-                # Create Event
-                event = FaceEvent(
-                    stream_id=stream_id,
-                    face_id=face_id,
-                    confidence=confidence,
-                    face_name=name,
-                    snapshot_path=snapshot_path
-                )
-                session.add(event)
-                events.append(event)
-            
-            session.commit()
+                    # Save event snapshot (the full frame)
+                    snapshot_filename = f"event_{int(time.time())}_{face_id}.jpg"
+                    snapshot_path = self._save_snapshot(img, snapshot_filename)
+
+                    # Create Event
+                    event = FaceEvent(
+                        stream_id=stream_id,
+                        face_id=face_id,
+                        confidence=confidence,
+                        face_name=name,
+                        snapshot_path=snapshot_path
+                    )
+                    session.add(event)
+                    events.append(event)
+                
+                session.commit()
+            except Exception as e:
+                logger.error(f"Error saving face events: {e}")
+                session.rollback()
+                return []
             
         return events
 
@@ -319,21 +319,25 @@ class FaceService:
                                 is_known=True
                             )
                             session.add(db_face)
-                            session.commit()
-                            session.refresh(db_face)
+                            session.flush()
                             logger.info(f"Registered new face from disk: {name}")
                             # Save initial thumbnail
-                            self._save_thumbnail(img, face, db_face.id)
+                            path = self._save_thumbnail_file(img, face, db_face.id)
+                            if path:
+                                db_face.thumbnail_path = path
+                                session.add(db_face)
                         
                         # Add embedding if not already at limit
                         if db_face.embedding_count < 50:
-                            self._save_face_embedding(db_face.id, face.embedding, img, face)
+                            self._save_face_embedding_data(session, db_face.id, face.embedding, img, face)
+                        
+                        session.commit()
                             
                 except Exception as e:
                     logger.error(f"Error processing pretrain image {img_path}: {e}")
 
-    def _save_thumbnail(self, img, face, face_id):
-        """Save a cropped thumbnail of the face."""
+    def _save_thumbnail_file(self, img, face, face_id) -> Optional[str]:
+        """Save a cropped thumbnail file and return the path."""
         try:
             bbox = face.bbox.astype(int)
             x1, y1, x2, y2 = bbox
@@ -355,24 +359,16 @@ class FaceService:
             
             # Write file and check success
             success = cv2.imwrite(path, crop)
-            if not success:
+            if success:
+                return path
+            else:
                 logger.error(f"cv2.imwrite failed for {path}")
-                return
-            
-            # Update DB with path
-            with Session(engine) as session:
-                db_face = session.get(Face, face_id)
-                if db_face:
-                    db_face.thumbnail_path = path
-                    session.add(db_face)
-                    session.commit()
-                    logger.debug(f"Saved thumbnail for face {face_id} to {path}")
-                    
         except Exception as e:
-            logger.error(f"Failed to save thumbnail: {e}")
+            logger.error(f"Failed to save thumbnail file: {e}")
+        return None
 
-    def _save_face_embedding(self, face_id: int, embedding: np.ndarray, img: Optional[np.ndarray] = None, face_obj: Optional[Dict] = None):
-        """Save a new embedding for a face and update the average."""
+    def _save_face_embedding_data(self, session: Session, face_id: int, embedding: np.ndarray, img: Optional[np.ndarray] = None, face_obj: Optional[Dict] = None):
+        """Save a new embedding for a face and update the average using provided session."""
         try:
             from app.models import FaceEmbedding
             
@@ -397,37 +393,38 @@ class FaceService:
                 except Exception as e:
                     logger.error(f"Failed to save embedding crop: {e}")
             
-            with Session(engine) as session:
-                # Save individual embedding
-                new_emb = FaceEmbedding(
-                    face_id=face_id,
-                    embedding=embedding_bytes,
-                    source="camera",
-                    quality_score=0.0, # Future: calculate quality
-                    image_path=image_path
-                )
-                session.add(new_emb)
+            # Save individual embedding
+            new_emb = FaceEmbedding(
+                face_id=face_id,
+                embedding=embedding_bytes,
+                source="camera",
+                quality_score=0.0, # Future: calculate quality
+                image_path=image_path
+            )
+            session.add(new_emb)
+            
+            # Update Face summary stats
+            db_face = session.get(Face, face_id)
+            if db_face:
+                # Update count
+                db_face.embedding_count += 1
                 
-                # Update Face summary stats
-                db_face = session.get(Face, face_id)
-                if db_face:
-                    # Update count
-                    db_face.embedding_count += 1
+                # Update average embedding (simplified: running average)
+                if db_face.avg_embedding:
+                    current_avg = pickle.loads(db_face.avg_embedding)
+                    # New average = (old_avg * (count-1) + new_emb) / count
+                    new_avg = (current_avg * (db_face.embedding_count - 1) + embedding) / db_face.embedding_count
+                    db_face.avg_embedding = pickle.dumps(new_avg)
+                else:
+                    db_face.avg_embedding = embedding_bytes
                     
-                    # Update average embedding (simplified: running average)
-                    if db_face.avg_embedding:
-                        current_avg = pickle.loads(db_face.avg_embedding)
-                        # New average = (old_avg * (count-1) + new_emb) / count
-                        new_avg = (current_avg * (db_face.embedding_count - 1) + embedding) / db_face.embedding_count
-                        db_face.avg_embedding = pickle.dumps(new_avg)
-                    else:
-                        db_face.avg_embedding = embedding_bytes
-                        
-                    session.add(db_face)
+                session.add(db_face)
                 
-                session.commit()
         except Exception as e:
-            logger.error(f"Failed to save face embedding: {e}")
+            logger.error(f"Failed to process face embedding data: {e}")
+
+
+face_service = FaceService()
 
 
 face_service = FaceService()

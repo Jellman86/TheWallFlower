@@ -48,7 +48,7 @@ _database_url = get_database_url()
 engine = create_engine(
     _database_url,
     echo=settings.debug,  # SQL logging in debug mode
-    connect_args={"check_same_thread": False}  # Required for SQLite with FastAPI
+    connect_args={"check_same_thread": False, "timeout": 30}  # Required for SQLite with FastAPI
 )
 
 # Enable Write-Ahead Logging (WAL) for better concurrency

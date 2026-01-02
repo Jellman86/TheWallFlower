@@ -655,8 +655,8 @@ class StreamWorker:
                     "rms": float(rms),
                     "max": float(max_val),
                     "speech_prob": float(speech_prob) if speech_prob is not None else 0.0,
-                    "skipped_energy": skipped_energy,
-                    "skipped_vad": skipped_vad,
+                    "skipped_energy": bool(skipped_energy),
+                    "skipped_vad": bool(skipped_vad),
                 }
 
                 # Broadcast to level subscribers (ALWAYS - so visualizer works)
