@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Constants
 COSINE_THRESHOLD = 0.5  # Similarity threshold for matching known faces (0.0 - 1.0)
 UNKNOWN_DEDUP_THRESHOLD = 0.6  # Higher threshold for deduplicating unknown faces
+MIN_FACE_AREA = 1000 # Minimum area (px) to consider for recognition (e.g. 32x32)
 MODEL_NAME = "buffalo_l" # "buffalo_l" (better) or "buffalo_s" (faster)
 FACE_DB_CACHE_TTL = 60 # Seconds to cache known face embeddings in memory
 
@@ -135,6 +136,13 @@ class FaceService:
             (name, face_id, confidence)
         """
         self._update_cache()
+
+        # Filter by area
+        bbox = detected_face.bbox
+        area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        if area < MIN_FACE_AREA:
+            logger.debug(f"Skipping small face (area={area:.0f})")
+            return "Unknown", None, 0.0
 
         best_match_name = "Unknown"
         best_match_id = None

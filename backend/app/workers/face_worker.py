@@ -12,6 +12,7 @@ from datetime import datetime
 
 from app.models import StreamConfig
 from app.services.detection.face_service import face_service, INSIGHTFACE_AVAILABLE
+from app.services.event_broadcaster import event_broadcaster
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,17 @@ class FaceDetectionWorker:
                         if events:
                             self.faces_detected += len(events)
                             logger.info(f"Stream {self.config.id}: Detected {len(events)} faces")
+                            
+                            # Emit events for UI
+                            for event in events:
+                                event_broadcaster.emit_face(self.config.id, {
+                                    "id": event.id,
+                                    "face_id": event.face_id,
+                                    "face_name": event.face_name,
+                                    "confidence": event.confidence,
+                                    "timestamp": event.timestamp.isoformat(),
+                                    "snapshot_path": event.snapshot_path
+                                })
                         
                         self.last_detection_time = datetime.now()
                     else:

@@ -148,6 +148,15 @@ class EventBroadcaster:
         )
         self.broadcast_sync(event)
 
+    def emit_face(self, stream_id: int, face_data: Dict[str, Any]):
+        """Emit a face detection event."""
+        event = StreamEvent(
+            event_type="face",
+            stream_id=stream_id,
+            data=face_data,
+        )
+        self.broadcast_sync(event)
+
     def emit_error(self, stream_id: int, error: str):
         """Emit an error event."""
         event = StreamEvent(
