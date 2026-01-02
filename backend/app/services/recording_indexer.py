@@ -30,15 +30,17 @@ class RecordingEventHandler(FileSystemEventHandler):
         path = Path(file_path)
         try:
             # Expected path: /data/recordings/{stream_id}/{filename}
-            # The worker uses: /data/recordings/{stream_id}/%Y-%m-%d_%H-%M-%S.mp4
-            # It does NOT use nested date/hour folders yet in the implemented worker.
-            # Checking worker implementation...
-            # output_pattern = f"{self.base_dir}/%Y-%m-%d_%H-%M-%S.mp4"
-            # self.base_dir = Path("/data/recordings") / str(config.id)
+            from app.config import settings
+            base_recordings_path = Path(settings.data_path) / "recordings"
+
+            # So structure is: {data_path}/recordings/{stream_id}/2026-01-01_12-00-00.mp4
             
-            # So structure is: /data/recordings/{stream_id}/2026-01-01_12-00-00.mp4
-            
-            rel_path = path.relative_to("/data/recordings")
+            try:
+                rel_path = path.relative_to(base_recordings_path)
+            except ValueError:
+                # File is not in our recordings dir?
+                return
+                
             parts = rel_path.parts
             
             if len(parts) < 2:
@@ -111,9 +113,10 @@ class RecordingEventHandler(FileSystemEventHandler):
 
 class RecordingIndexer:
     def __init__(self):
+        from app.config import settings
         self.observer = Observer()
         self.handler = RecordingEventHandler()
-        self.watch_dir = "/data/recordings"
+        self.watch_dir = os.path.join(settings.data_path, "recordings")
         
         # Ensure dir exists
         os.makedirs(self.watch_dir, exist_ok=True)

@@ -239,9 +239,15 @@ class FaceService:
             crop = img[y1:y2, x1:x2]
             
             # Ensure directory exists
-            os.makedirs("/data/faces", exist_ok=True)
-            path = f"/data/faces/{face_id}.jpg"
-            cv2.imwrite(path, crop)
+            faces_dir = os.path.join(settings.data_path, "faces")
+            os.makedirs(faces_dir, exist_ok=True)
+            path = os.path.join(faces_dir, f"{face_id}.jpg")
+            
+            # Write file and check success
+            success = cv2.imwrite(path, crop)
+            if not success:
+                logger.error(f"cv2.imwrite failed for {path}")
+                return
             
             # Update DB with path
             with Session(engine) as session:
@@ -250,6 +256,7 @@ class FaceService:
                     db_face.thumbnail_path = path
                     session.add(db_face)
                     session.commit()
+                    logger.debug(f"Saved thumbnail for face {face_id} to {path}")
                     
         except Exception as e:
             logger.error(f"Failed to save thumbnail: {e}")

@@ -25,7 +25,7 @@ class RecordingWorker:
         
         # Base directory for recordings: /data/recordings/{stream_id}
         # Note: Container mounts /data to host's data directory.
-        self.base_dir = Path("/data/recordings") / str(config.id)
+        self.base_dir = Path(settings.data_path) / "recordings" / str(config.id)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         
         # Internal state

@@ -43,6 +43,25 @@ class Settings:
 
     # Frontend
     frontend_path: str = "/app/frontend/dist"
+    
+    # Storage
+    data_path: str = "/data"
+
+
+def get_data_path() -> str:
+    """Determine the data path (with fallback for local dev)."""
+    # Check if DATA_PATH is explicitly set
+    if os.getenv("DATA_PATH"):
+        return os.getenv("DATA_PATH")
+        
+    # Try /data (standard Docker path)
+    if os.access("/data", os.W_OK):
+        return "/data"
+        
+    # Fallback to local directory (relative to this file)
+    # backend/app/config.py -> backend/data
+    local_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    return local_path
 
 
 @lru_cache()
@@ -54,9 +73,14 @@ def get_settings() -> Settings:
     Returns:
         Settings object with values from environment variables.
     """
+    data_path = get_data_path()
+    
     return Settings(
         # Database
-        database_url=os.getenv("DATABASE_URL", Settings.database_url),
+        database_url=os.getenv("DATABASE_URL", f"sqlite:///{data_path}/thewallflower.db"),
+        
+        # Storage
+        data_path=data_path,
 
         # WhisperLive
         whisper_host=os.getenv("WHISPER_HOST", Settings.whisper_host),

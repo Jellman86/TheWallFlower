@@ -44,6 +44,7 @@ class RecordingService:
     def delete_old_recordings(self):
         """Delete recordings older than retention policy."""
         from app.models import StreamConfig
+        from app.config import settings
         from pathlib import Path
         
         with Session(engine) as session:
@@ -67,7 +68,7 @@ class RecordingService:
                 for rec in recordings:
                     try:
                         # Delete file
-                        full_path = Path("/data/recordings") / rec.file_path
+                        full_path = Path(settings.data_path) / "recordings" / rec.file_path
                         if full_path.exists():
                             full_path.unlink()
                     except Exception as e:
