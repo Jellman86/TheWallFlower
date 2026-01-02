@@ -19,6 +19,7 @@ import os
 import subprocess
 import threading
 import time
+import copy
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -302,7 +303,6 @@ class StreamWorker:
     def status(self) -> StreamStatus:
         """Get current stream status with thread health."""
         with self._status_lock:
-            import copy
             self._status.video_thread_alive = self._status.is_running
             self._status.audio_thread_alive = (
                 self._audio_thread is not None and self._audio_thread.is_alive()

@@ -425,6 +425,3 @@ class FaceService:
 
 
 face_service = FaceService()
-
-
-face_service = FaceService()
