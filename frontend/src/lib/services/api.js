@@ -221,7 +221,7 @@ export const faces = {
     let query = `?limit=${limit}&offset=${offset}`;
     if (faceId !== null) query += `&face_id=${faceId}`;
     if (streamId !== null) query += `&stream_id=${streamId}`;
-    
+
     const response = await fetchWithTimeout(`${BASE_URL}/faces/events/all${query}`);
     return handleResponse(response);
   },
@@ -257,7 +257,61 @@ export const faces = {
     });
     return handleResponse(response);
   },
-  
+
+  /**
+   * Get known face names for autocomplete.
+   * @returns {Promise<Array<{name: string, face_id: number, embedding_count: number, thumbnail_path: string}>>}
+   */
+  async getKnownNames() {
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/names`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Get faces grouped by name.
+   * @returns {Promise<{groups: Array, total_groups: number, total_faces: number}>}
+   */
+  async getGrouped(knownOnly = false) {
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/grouped?known_only=${knownOnly}`);
+    return handleResponse(response);
+  },
+
+  /**
+   * Merge multiple faces into one identity.
+   * @param {number[]} faceIds - IDs of faces to merge
+   * @param {string} targetName - Name for the merged identity
+   * @param {number|null} keepFaceId - Optional ID of face to keep as primary
+   * @returns {Promise<{merged_face_id: number, merged_count: number, total_embeddings: number, name: string}>}
+   */
+  async merge(faceIds, targetName, keepFaceId = null) {
+    const body = {
+      face_ids: faceIds,
+      target_name: targetName
+    };
+    if (keepFaceId !== null) {
+      body.keep_face_id = keepFaceId;
+    }
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Assign a face to an existing person (merges if name exists).
+   * @param {number} faceId - ID of face to assign
+   * @param {string} targetName - Name to assign to (merges if exists)
+   * @returns {Promise<{merged_face_id: number, merged_count: number, total_embeddings: number, name: string}>}
+   */
+  async assignToExisting(faceId, targetName) {
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/${faceId}/assign/${encodeURIComponent(targetName)}`, {
+      method: 'POST'
+    });
+    return handleResponse(response);
+  },
+
   /**
    * Get snapshot URL.
    */
@@ -268,7 +322,7 @@ export const faces = {
     const name = parts[parts.length - 1];
     return `${API_BASE}/snapshots/${name}`;
   },
-  
+
   /**
    * Get embedding crop URL.
    */

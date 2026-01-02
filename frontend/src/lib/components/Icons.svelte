@@ -112,5 +112,9 @@
     <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
     <line x1="12" y1="19" x2="12" y2="23"></line>
     <line x1="8" y1="23" x2="16" y2="23"></line>
+  {:else if name === 'git-merge'}
+    <circle cx="18" cy="18" r="3"></circle>
+    <circle cx="6" cy="6" r="3"></circle>
+    <path d="M6 21V9a9 9 0 0 0 9 9"></path>
   {/if}
 </svg>

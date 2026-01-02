@@ -64,6 +64,7 @@
   ></audio>
 
   <button
+    type="button"
     onclick={togglePlay}
     disabled={!isRunning}
     class="flex items-center gap-2 px-3 py-1.5 text-xs rounded transition-colors
