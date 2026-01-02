@@ -5,6 +5,30 @@
 export const API_BASE = '/api';
 const BASE_URL = API_BASE;
 
+/** Default request timeout in milliseconds */
+const DEFAULT_TIMEOUT = 30000;
+
+/**
+ * Fetch with timeout support.
+ * @param {string} url - URL to fetch
+ * @param {RequestInit} options - Fetch options
+ * @param {number} timeout - Timeout in ms (default 30s)
+ */
+async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * Handle API response, throwing on error.
  */
@@ -27,7 +51,7 @@ export const streams = {
    * List all streams.
    */
   async list() {
-    const response = await fetch(`${BASE_URL}/streams`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams`);
     return handleResponse(response);
   },
 
@@ -35,7 +59,7 @@ export const streams = {
    * Get a single stream by ID.
    */
   async get(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}`);
     return handleResponse(response);
   },
 
@@ -43,7 +67,7 @@ export const streams = {
    * Create a new stream.
    */
   async create(data) {
-    const response = await fetch(`${BASE_URL}/streams`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -55,7 +79,7 @@ export const streams = {
    * Update a stream.
    */
   async update(id, data) {
-    const response = await fetch(`${BASE_URL}/streams/${id}`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -67,7 +91,7 @@ export const streams = {
    * Delete a stream.
    */
   async delete(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}`, {
       method: 'DELETE'
     });
     return handleResponse(response);
@@ -82,7 +106,7 @@ export const control = {
    * Start a stream.
    */
   async start(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/start`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/start`, {
       method: 'POST'
     });
     return handleResponse(response);
@@ -92,9 +116,10 @@ export const control = {
    * Test RTSP connection without creating a stream.
    */
   async testConnection(rtspUrl) {
-    const response = await fetch(`${BASE_URL}/streams/test-connection?rtsp_url=${encodeURIComponent(rtspUrl)}`, {
+    // Use longer timeout for connection testing (60s)
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/test-connection?rtsp_url=${encodeURIComponent(rtspUrl)}`, {
       method: 'POST'
-    });
+    }, 60000);
     return handleResponse(response);
   },
 
@@ -102,7 +127,7 @@ export const control = {
    * Stop a stream.
    */
   async stop(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/stop`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/stop`, {
       method: 'POST'
     });
     return handleResponse(response);
@@ -112,7 +137,7 @@ export const control = {
    * Restart a stream.
    */
   async restart(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/restart`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/restart`, {
       method: 'POST'
     });
     return handleResponse(response);
@@ -122,7 +147,7 @@ export const control = {
    * Force retry a stream connection (resets circuit breaker).
    */
   async forceRetry(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/force-retry`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/force-retry`, {
       method: 'POST'
     });
     return handleResponse(response);
@@ -132,7 +157,7 @@ export const control = {
    * Get stream diagnostics including validation and worker status.
    */
   async getDiagnostics(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/diagnostics`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/diagnostics`);
     return handleResponse(response);
   }
 };
@@ -145,7 +170,7 @@ export const status = {
    * Get status of a specific stream.
    */
   async get(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/status`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/status`);
     return handleResponse(response);
   },
 
@@ -153,7 +178,7 @@ export const status = {
    * Get status of all streams.
    */
   async getAll() {
-    const response = await fetch(`${BASE_URL}/status`);
+    const response = await fetchWithTimeout(`${BASE_URL}/status`);
     return handleResponse(response);
   }
 };
@@ -166,7 +191,7 @@ export const transcripts = {
    * Get recent transcripts for a stream.
    */
   async get(id, limit = 50) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/transcripts?limit=${limit}`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/transcripts?limit=${limit}`);
     return handleResponse(response);
   }
 };
@@ -183,7 +208,7 @@ export const faces = {
     if (known !== null) {
       query += `&known=${known}`;
     }
-    const response = await fetch(`${BASE_URL}/faces${query}`);
+    const response = await fetchWithTimeout(`${BASE_URL}/faces${query}`);
     return handleResponse(response);
   },
 
@@ -194,8 +219,8 @@ export const faces = {
     let query = [];
     if (name !== undefined) query.push(`name=${encodeURIComponent(name)}`);
     if (isKnown !== undefined) query.push(`is_known=${isKnown}`);
-    
-    const response = await fetch(`${BASE_URL}/faces/${id}?${query.join('&')}`, {
+
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/${id}?${query.join('&')}`, {
       method: 'PATCH'
     });
     return handleResponse(response);
@@ -205,7 +230,7 @@ export const faces = {
    * Delete a face.
    */
   async delete(id) {
-    const response = await fetch(`${BASE_URL}/faces/${id}`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/${id}`, {
       method: 'DELETE'
     });
     return handleResponse(response);
@@ -234,8 +259,8 @@ export const recordings = {
     const params = new URLSearchParams();
     if (start) params.append('start_time', start.toISOString());
     if (end) params.append('end_time', end.toISOString());
-    
-    const response = await fetch(`${BASE_URL}/streams/${streamId}/recordings?${params}`);
+
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${streamId}/recordings?${params}`);
     return handleResponse(response);
   },
 
@@ -243,7 +268,7 @@ export const recordings = {
    * Get list of dates (YYYY-MM-DD) that have recordings.
    */
   async listDates(streamId) {
-    const response = await fetch(`${BASE_URL}/streams/${streamId}/recordings/dates`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${streamId}/recordings/dates`);
     return handleResponse(response);
   },
 
@@ -251,7 +276,7 @@ export const recordings = {
    * Delete a recording.
    */
   async delete(id) {
-    const response = await fetch(`${BASE_URL}/recordings/${id}`, {
+    const response = await fetchWithTimeout(`${BASE_URL}/recordings/${id}`, {
       method: 'DELETE'
     });
     return handleResponse(response);
@@ -334,7 +359,7 @@ export const go2rtc = {
    * Returns all available URLs for a stream.
    */
   async getUrls(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/urls`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/urls`);
     return handleResponse(response);
   },
 
@@ -342,7 +367,7 @@ export const go2rtc = {
    * Get go2rtc status and configured streams.
    */
   async getStatus() {
-    const response = await fetch(`${BASE_URL}/go2rtc/status`);
+    const response = await fetchWithTimeout(`${BASE_URL}/go2rtc/status`);
     return handleResponse(response);
   }
 };
@@ -364,7 +389,7 @@ export const audio = {
    * Returns effective config, per-stream overrides, and global defaults.
    */
   async getConfig(id) {
-    const response = await fetch(`${BASE_URL}/streams/${id}/audio-config`);
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/audio-config`);
     return handleResponse(response);
   }
 };
@@ -373,7 +398,7 @@ export const audio = {
  * Health check
  */
 export async function healthCheck() {
-  const response = await fetch(`${BASE_URL}/health`);
+  const response = await fetchWithTimeout(`${BASE_URL}/health`, {}, 10000);
   return handleResponse(response);
 }
 
@@ -382,7 +407,7 @@ export async function healthCheck() {
  */
 export async function fetchVersion() {
   try {
-    const response = await fetch(`${BASE_URL}/version`);
+    const response = await fetchWithTimeout(`${BASE_URL}/version`, {}, 5000);
     if (response.ok) {
       return await response.json();
     }

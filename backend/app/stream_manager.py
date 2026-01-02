@@ -461,8 +461,13 @@ class StreamManager:
         self._shutting_down = True
         sig_name = signal.Signals(signum).name
         logger.info(f"Received {sig_name}, initiating graceful shutdown...")
-        
+
         with self._workers_lock:
+            # Stop all worker types
+            for worker in self._face_workers.values():
+                worker.stop()
+            for worker in self._recording_workers.values():
+                worker.stop()
             for worker in self._workers.values():
                 worker.stop()
 
@@ -470,6 +475,11 @@ class StreamManager:
         if not self._shutting_down:
             logger.info("Process exiting, cleaning up workers...")
             with self._workers_lock:
+                # Stop all worker types
+                for worker in self._face_workers.values():
+                    worker.stop()
+                for worker in self._recording_workers.values():
+                    worker.stop()
                 for worker in self._workers.values():
                     worker.stop()
 

@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from app.config import settings
-from app.db import init_db, get_session
+from app.db import init_db, get_session, engine
 from app.models import (
     StreamConfig,
     StreamConfigCreate,
