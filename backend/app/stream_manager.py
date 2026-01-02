@@ -367,12 +367,14 @@ class StreamManager:
             if not worker:
                 return False
 
-            # Reset circuit breaker
-            worker._status.circuit_breaker_state = CircuitBreakerState.HALF_OPEN
-            worker._status.consecutive_failures = 0
-            worker._status.retry_count = 0
-            worker._status.next_retry_time = None
-            worker._status.error = "Retry requested - reconnecting..."
+            # Reset circuit breaker (thread-safe)
+            worker._update_status(
+                circuit_breaker_state=CircuitBreakerState.HALF_OPEN,
+                consecutive_failures=0,
+                retry_count=0,
+                next_retry_time=None,
+                error="Retry requested - reconnecting..."
+            )
             worker._emit_status_event()
 
             logger.info(f"Stream {stream_id}: Force retry requested, circuit breaker reset")

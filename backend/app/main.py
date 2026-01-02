@@ -1351,15 +1351,20 @@ def get_metrics():
 # Static File Serving (Frontend)
 # =============================================================================
 
-# Mount the frontend build directory - this will be populated by the build process
+# Mount faces directory for thumbnails
+faces_path = Path(settings.data_path) / "faces"
+faces_path.mkdir(parents=True, exist_ok=True)
+app.mount("/api/faces/thumbnails", StaticFiles(directory=str(faces_path)), name="face_thumbnails")
+
+# Mount snapshots directory for event full frames
+snapshots_path = Path(settings.data_path) / "snapshots"
+snapshots_path.mkdir(parents=True, exist_ok=True)
+app.mount("/api/snapshots", StaticFiles(directory=str(snapshots_path)), name="snapshots")
+
+# Mount the frontend build directory - this must be LAST as it matches "/"
 frontend_path = Path(settings.frontend_path)
 if frontend_path.exists():
     logger.info(f"Serving frontend from: {frontend_path}")
     app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 else:
     logger.warning(f"Frontend not found at {frontend_path}, API-only mode")
-
-# Mount faces directory for thumbnails
-faces_path = Path(settings.data_path) / "faces"
-faces_path.mkdir(parents=True, exist_ok=True)
-app.mount("/api/faces/thumbnails", StaticFiles(directory=str(faces_path)), name="face_thumbnails")

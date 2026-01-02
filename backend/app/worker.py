@@ -484,7 +484,7 @@ class StreamWorker:
         ffmpeg_process = None
         try:
             async with websockets.connect(whisper_url) as ws:
-                self._status.whisper_connected = True
+                self._update_status(whisper_connected=True)
                 self._whisper_reconnect_attempts = 0
                 logger.info(f"Connected to WhisperLive for stream {self.config.id}")
 
@@ -533,7 +533,7 @@ class StreamWorker:
                 )
                 self._stderr_thread.start()
 
-                self._status.audio_connected = True
+                self._update_status(audio_connected=True)
                 self._emit_status_event()
 
                 send_task = asyncio.create_task(self._send_audio(ws, ffmpeg_process))
@@ -556,8 +556,7 @@ class StreamWorker:
         except Exception as e:
             logger.error(f"WhisperLive connection error for stream {self.config.id}: {e}")
         finally:
-            self._status.whisper_connected = False
-            self._status.audio_connected = False
+            self._update_status(whisper_connected=False, audio_connected=False)
             self._ffmpeg_process = None
             self._emit_status_event()
             
@@ -630,9 +629,21 @@ class StreamWorker:
                 if not skipped_energy and vad_model is not None:
                     try:
                         import torch
-                        # Silero expects normalized audio tensor
-                        audio_tensor = torch.from_numpy(samples)
-                        speech_prob = vad_model(audio_tensor, 16000).item()
+                        # Silero expects specific chunk sizes (512 for 16kHz)
+                        # We process the 1s chunk in segments and take the max speech probability
+                        vad_chunk_size = 512
+                        probs = []
+                        
+                        # Use a copy to avoid "non-writable" warning
+                        audio_copy = samples.copy()
+                        
+                        for i in range(0, len(audio_copy) - vad_chunk_size + 1, vad_chunk_size):
+                            chunk = audio_copy[i:i+vad_chunk_size]
+                            audio_tensor = torch.from_numpy(chunk)
+                            prob = vad_model(audio_tensor, 16000).item()
+                            probs.append(prob)
+                        
+                        speech_prob = max(probs) if probs else 0.0
                         skipped_vad = speech_prob < vad_threshold
                     except Exception as e:
                         # If VAD fails, fall through and send audio anyway
@@ -787,7 +798,7 @@ class StreamWorker:
                         if len(self._transcript_segments) > 100:
                             self._transcript_segments = self._transcript_segments[-100:]
 
-                    self._status.last_transcript = segment.text
+                    self._update_status(last_transcript=segment.text)
 
                     if segment.is_final:
                         logger.info(f"New final transcript for stream {self.config.id}: {text}")

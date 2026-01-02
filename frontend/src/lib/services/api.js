@@ -237,6 +237,17 @@ export const faces = {
   },
   
   /**
+   * Get snapshot URL.
+   */
+  snapshotUrl(filename) {
+    if (!filename) return null;
+    // filename might be a full path from DB, we just need the basename
+    const parts = filename.split('/');
+    const name = parts[parts.length - 1];
+    return `${API_BASE}/snapshots/${name}`;
+  },
+  
+  /**
    * Get thumbnail URL.
    */
   thumbnailUrl(id) {

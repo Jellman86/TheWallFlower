@@ -122,6 +122,23 @@ class Face(SQLModel, table=True):
 
     # Simple boolean to mark if this face is 'known' (named by user)
     is_known: bool = Field(default=False)
+    
+    # Multi-embedding support
+    embedding_count: int = Field(default=1)
+    avg_embedding: Optional[bytes] = Field(default=None)
+
+
+class FaceEmbedding(SQLModel, table=True):
+    """Individual embedding for a face (supports multiple per person)."""
+    __tablename__ = "face_embeddings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    face_id: int = Field(foreign_key="faces.id", index=True)
+    embedding: bytes
+    source: str = Field(default="camera")  # 'upload', 'camera', 'pretrain'
+    quality_score: float = Field(default=0.0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    image_path: Optional[str] = None
 
 
 class FaceRead(SQLModel):

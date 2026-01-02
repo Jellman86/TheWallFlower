@@ -18,6 +18,7 @@ except ImportError:
 
 from app.db import engine
 from app.models import Face, FaceEvent
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class FaceService:
         self.app = None
         self.model_loaded = False
         self.known_faces_cache: List[Face] = []
+        self.face_embeddings_cache: Dict[int, np.ndarray] = {}
         self.last_cache_update = 0
         self._initialized = True
         
@@ -88,14 +90,23 @@ class FaceService:
                 # Fetch all faces
                 faces = session.exec(select(Face)).all()
                 self.known_faces_cache = []
+                # Keep existing embeddings for faces we already have
+                new_embeddings_cache = {}
+                
                 for face in faces:
                     try:
-                        # Deserialize embedding
-                        face.embedding_numpy = pickle.loads(face.embedding)
+                        # Use average embedding if available, otherwise the primary one
+                        embedding_to_load = face.avg_embedding if face.avg_embedding else face.embedding
+                        
+                        # Use a hash of the embedding to check if it changed
+                        # (Simple optimization to avoid redundant pickle.loads)
+                        new_embeddings_cache[face.id] = pickle.loads(embedding_to_load)
+                        
                         self.known_faces_cache.append(face)
                     except Exception as e:
                         logger.error(f"Error deserializing embedding for face {face.id}: {e}")
                 
+                self.face_embeddings_cache = new_embeddings_cache
                 self.last_cache_update = now
                 logger.debug(f"Updated face cache: {len(self.known_faces_cache)} faces loaded.")
         except Exception as e:
@@ -138,7 +149,10 @@ class FaceService:
         target_norm = np.linalg.norm(target_embedding)
 
         for known_face in self.known_faces_cache:
-            known_embedding = known_face.embedding_numpy
+            known_embedding = self.face_embeddings_cache.get(known_face.id)
+            if known_embedding is None:
+                continue
+                
             known_norm = np.linalg.norm(known_embedding)
 
             # Cosine similarity
@@ -200,20 +214,37 @@ class FaceService:
                     name = f"Unknown-{face_id}"  # Temp name for display
 
                     # Save thumbnail
-                    self._save_thumbnail(img, face, new_face.id)
+                    self._save_thumbnail(img, face, face_id)
+                    
+                    # Save initial embedding
+                    self._save_face_embedding(face_id, face.embedding)
                 else:
                     # Update last_seen for matched face (known or deduplicated unknown)
                     matched_face = session.get(Face, face_id)
                     if matched_face:
                         matched_face.last_seen = datetime.now()
+                        
+                        # If face missing thumbnail (e.g. due to previous errors), save it now
+                        if not matched_face.thumbnail_path:
+                            self._save_thumbnail(img, face, face_id)
+                            
                         session.add(matched_face)
+                        
+                        # Save this embedding too to improve recognition over time (limit to 50 per face)
+                        if matched_face.embedding_count < 50:
+                            self._save_face_embedding(face_id, face.embedding)
+
+                # Save event snapshot (the full frame)
+                snapshot_filename = f"event_{int(datetime.now().timestamp())}_{face_id}.jpg"
+                snapshot_path = self._save_snapshot(img, snapshot_filename)
 
                 # Create Event
                 event = FaceEvent(
                     stream_id=stream_id,
                     face_id=face_id,
                     confidence=confidence,
-                    face_name=name
+                    face_name=name,
+                    snapshot_path=snapshot_path
                 )
                 session.add(event)
                 events.append(event)
@@ -221,6 +252,22 @@ class FaceService:
             session.commit()
             
         return events
+
+    def _save_snapshot(self, img, filename):
+        """Save a full frame snapshot for an event."""
+        try:
+            snapshots_dir = os.path.join(settings.data_path, "snapshots")
+            os.makedirs(snapshots_dir, exist_ok=True)
+            path = os.path.join(snapshots_dir, filename)
+            
+            success = cv2.imwrite(path, img)
+            if success:
+                return path
+            else:
+                logger.error(f"cv2.imwrite failed for snapshot {path}")
+        except Exception as e:
+            logger.error(f"Failed to save snapshot: {e}")
+        return None
 
     def _save_thumbnail(self, img, face, face_id):
         """Save a cropped thumbnail of the face."""
@@ -260,6 +307,44 @@ class FaceService:
                     
         except Exception as e:
             logger.error(f"Failed to save thumbnail: {e}")
+
+    def _save_face_embedding(self, face_id: int, embedding: np.ndarray):
+        """Save a new embedding for a face and update the average."""
+        try:
+            from app.models import FaceEmbedding
+            
+            embedding_bytes = pickle.dumps(embedding)
+            
+            with Session(engine) as session:
+                # Save individual embedding
+                new_emb = FaceEmbedding(
+                    face_id=face_id,
+                    embedding=embedding_bytes,
+                    source="camera",
+                    quality_score=0.0 # Future: calculate quality
+                )
+                session.add(new_emb)
+                
+                # Update Face summary stats
+                db_face = session.get(Face, face_id)
+                if db_face:
+                    # Update count
+                    db_face.embedding_count += 1
+                    
+                    # Update average embedding (simplified: running average)
+                    if db_face.avg_embedding:
+                        current_avg = pickle.loads(db_face.avg_embedding)
+                        # New average = (old_avg * (count-1) + new_emb) / count
+                        new_avg = (current_avg * (db_face.embedding_count - 1) + embedding) / db_face.embedding_count
+                        db_face.avg_embedding = pickle.dumps(new_avg)
+                    else:
+                        db_face.avg_embedding = embedding_bytes
+                        
+                    session.add(db_face)
+                
+                session.commit()
+        except Exception as e:
+            logger.error(f"Failed to save face embedding: {e}")
 
 
 face_service = FaceService()
