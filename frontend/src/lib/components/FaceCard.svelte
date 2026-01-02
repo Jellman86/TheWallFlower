@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { faces } from '../services/api.js';
   import Icon from './Icons.svelte';
+  import FaceReviewModal from './FaceReviewModal.svelte';
 
   let {
     face,
@@ -10,6 +11,7 @@
   } = $props();
 
   let isEditing = $state(false);
+  let showReview = $state(false);
   let editName = $state('');
   let isLoading = $state(false);
 
@@ -48,7 +50,7 @@
 
 <div class="bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-lg overflow-hidden flex flex-col group">
   <!-- Thumbnail -->
-  <div class="relative aspect-square bg-[var(--color-bg-dark)] overflow-hidden">
+  <div class="relative aspect-square bg-[var(--color-bg-dark)] overflow-hidden cursor-pointer" onclick={() => showReview = true}>
     {#if face.thumbnail_path}
       <img
         src={faces.thumbnailUrl(face.id)}
@@ -67,6 +69,11 @@
       <span class="px-2 py-0.5 text-xs rounded-full font-medium {face.is_known ? 'bg-[var(--color-success)]/80 text-white' : 'bg-[var(--color-warning)]/80 text-black'}">
         {face.is_known ? 'Known' : 'Unknown'}
       </span>
+    </div>
+
+    <!-- Review Overlay -->
+    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+      <span class="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-bold text-white border border-white/30">Review</span>
     </div>
   </div>
 
@@ -89,7 +96,7 @@
         </button>
       </div>
     {:else}
-      <h3 class="font-semibold truncate mb-1" title={face.name}>{face.name}</h3>
+      <h3 class="font-semibold truncate mb-1 cursor-pointer hover:text-[var(--color-primary)] transition-colors" title={face.name} onclick={() => showReview = true}>{face.name}</h3>
     {/if}
 
     <p class="text-xs text-[var(--color-text-muted)] mb-3">
@@ -100,10 +107,17 @@
     <div class="mt-auto flex justify-between gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
       {#if !isEditing}
         <button
-          onclick={() => { editName = face.name; isEditing = true; }}
+          onclick={() => showReview = true}
           class="flex-1 py-1 text-xs bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] rounded transition-colors"
         >
-          Edit
+          Review
+        </button>
+        <button
+          onclick={() => { editName = face.name; isEditing = true; }}
+          class="px-2 py-1 text-xs bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] rounded transition-colors"
+          title="Quick Rename"
+        >
+          <Icon name="settings" size={14} />
         </button>
         <button
           onclick={handleDelete}
@@ -115,3 +129,10 @@
     </div>
   </div>
 </div>
+
+<FaceReviewModal 
+  {face}
+  isOpen={showReview}
+  onClose={() => showReview = false}
+  onUpdated={onUpdate}
+/>

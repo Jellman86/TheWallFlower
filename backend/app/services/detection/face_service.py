@@ -217,7 +217,7 @@ class FaceService:
                     self._save_thumbnail(img, face, face_id)
                     
                     # Save initial embedding
-                    self._save_face_embedding(face_id, face.embedding)
+                    self._save_face_embedding(face_id, face.embedding, img, face)
                 else:
                     # Update last_seen for matched face (known or deduplicated unknown)
                     matched_face = session.get(Face, face_id)
@@ -232,7 +232,7 @@ class FaceService:
                         
                         # Save this embedding too to improve recognition over time (limit to 50 per face)
                         if matched_face.embedding_count < 50:
-                            self._save_face_embedding(face_id, face.embedding)
+                            self._save_face_embedding(face_id, face.embedding, img, face)
 
                 # Save event snapshot (the full frame)
                 snapshot_filename = f"event_{int(datetime.now().timestamp())}_{face_id}.jpg"
@@ -268,6 +268,61 @@ class FaceService:
         except Exception as e:
             logger.error(f"Failed to save snapshot: {e}")
         return None
+
+    def scan_known_faces(self):
+        """Scan /data/faces/known/{name}/ for images to pre-train the model."""
+        known_dir = os.path.join(settings.data_path, "faces", "known")
+        if not os.path.exists(known_dir):
+            os.makedirs(known_dir, exist_ok=True)
+            return
+
+        logger.info(f"Scanning for known faces in {known_dir}...")
+        
+        for name in os.listdir(known_dir):
+            person_dir = os.path.join(known_dir, name)
+            if not os.path.isdir(person_dir):
+                continue
+                
+            for filename in os.listdir(person_dir):
+                if not filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    continue
+                    
+                img_path = os.path.join(person_dir, filename)
+                try:
+                    img = cv2.imread(img_path)
+                    if img is None:
+                        continue
+                        
+                    faces = self.detect_faces(img)
+                    if not faces:
+                        logger.warning(f"No face detected in {img_path}")
+                        continue
+                        
+                    # Use the largest face if multiple detected
+                    face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+                    
+                    with Session(engine) as session:
+                        # Find or create face
+                        db_face = session.exec(select(Face).where(Face.name == name)).first()
+                        if not db_face:
+                            db_face = Face(
+                                name=name,
+                                embedding=pickle.dumps(face.embedding),
+                                is_known=True
+                            )
+                            session.add(db_face)
+                            session.commit()
+                            session.refresh(db_face)
+                            logger.info(f"Registered new face from disk: {name}")
+                            # Save initial thumbnail
+                            self._save_thumbnail(img, face, db_face.id)
+                        
+                        # Add embedding if not already at limit
+                        if db_face.embedding_count < 50:
+                            self._save_face_embedding(db_face.id, face.embedding, img, face)
+                            
+                except Exception as e:
+                    logger.error(f"Error processing pretrain image {img_path}: {e}")
 
     def _save_thumbnail(self, img, face, face_id):
         """Save a cropped thumbnail of the face."""
@@ -308,12 +363,31 @@ class FaceService:
         except Exception as e:
             logger.error(f"Failed to save thumbnail: {e}")
 
-    def _save_face_embedding(self, face_id: int, embedding: np.ndarray):
+    def _save_face_embedding(self, face_id: int, embedding: np.ndarray, img: Optional[np.ndarray] = None, face_obj: Optional[Dict] = None):
         """Save a new embedding for a face and update the average."""
         try:
             from app.models import FaceEmbedding
             
             embedding_bytes = pickle.dumps(embedding)
+            image_path = None
+
+            # Save a crop if image provided
+            if img is not None and face_obj is not None:
+                try:
+                    bbox = face_obj.bbox.astype(int)
+                    x1, y1, x2, y2 = bbox
+                    h, w, _ = img.shape
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    crop = img[y1:y2, x1:x2]
+                    
+                    emb_dir = os.path.join(settings.data_path, "embeddings")
+                    os.makedirs(emb_dir, exist_ok=True)
+                    filename = f"{face_id}_{int(time.time()*1000)}.jpg"
+                    image_path = os.path.join(emb_dir, filename)
+                    cv2.imwrite(image_path, crop)
+                except Exception as e:
+                    logger.error(f"Failed to save embedding crop: {e}")
             
             with Session(engine) as session:
                 # Save individual embedding
@@ -321,7 +395,8 @@ class FaceService:
                     face_id=face_id,
                     embedding=embedding_bytes,
                     source="camera",
-                    quality_score=0.0 # Future: calculate quality
+                    quality_score=0.0, # Future: calculate quality
+                    image_path=image_path
                 )
                 session.add(new_emb)
                 

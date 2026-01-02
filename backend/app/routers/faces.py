@@ -85,3 +85,50 @@ def delete_face(face_id: int, session: Session = Depends(get_session)):
     session.delete(face)
     session.commit()
     return {"status": "deleted", "id": face_id}
+
+@router.get("/{face_id}/embeddings", response_model=List[dict])
+def list_face_embeddings(
+    face_id: int,
+    session: Session = Depends(get_session)
+):
+    """List all embeddings for a face."""
+    from app.models import FaceEmbedding
+    statement = select(FaceEmbedding).where(FaceEmbedding.face_id == face_id)
+    statement = statement.order_by(col(FaceEmbedding.created_at).desc())
+    
+    results = session.exec(statement).all()
+    
+    # Return as dict to exclude binary embedding and include image URL if possible
+    return [
+        {
+            "id": e.id,
+            "created_at": e.created_at,
+            "source": e.source,
+            "quality_score": e.quality_score,
+            "image_path": e.image_path
+        }
+        for e in results
+    ]
+
+@router.get("/events/all", response_model=List[FaceEvent])
+def list_face_events(
+    face_id: Optional[int] = None,
+    stream_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: Session = Depends(get_session)
+):
+    """List face detection events."""
+    statement = select(FaceEvent)
+
+    if face_id is not None:
+        statement = statement.where(FaceEvent.face_id == face_id)
+    
+    if stream_id is not None:
+        statement = statement.where(FaceEvent.stream_id == stream_id)
+
+    # Sort by timestamp descending (newest first)
+    statement = statement.order_by(col(FaceEvent.timestamp).desc())
+    statement = statement.offset(offset).limit(limit)
+
+    return session.exec(statement).all()

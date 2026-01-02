@@ -7,6 +7,7 @@
   import AudioVisualizer from './AudioVisualizer.svelte';
   import TranscriptPanel from './TranscriptPanel.svelte';
   import RecordingsPanel from './RecordingsPanel.svelte';
+  import FaceEventsPanel from './FaceEventsPanel.svelte';
 
   let {
     stream,
@@ -16,7 +17,7 @@
   } = $props();
 
   // Local state for view logic
-  let showRecordings = $state(false); // Tab toggle state
+  let activeView = $state('live'); // 'live', 'recordings', 'faces'
 
   // Use global store for status and transcripts
   let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
@@ -161,8 +162,8 @@
       <!-- Sidebar / Tabs -->
       <div class="bg-[var(--color-bg-dark)] border-b md:border-b-0 md:border-r border-[var(--color-border)] flex md:flex-col shrink-0">
         <button
-          onclick={() => showRecordings = false}
-          class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { !showRecordings ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
+          onclick={() => activeView = 'live'}
+          class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { activeView === 'live' ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
         >
           <Icon name="video" size={18} />
           <span class="hidden md:inline">Live</span>
@@ -170,19 +171,33 @@
         
         {#if stream.recording_enabled}
           <button
-            onclick={() => showRecordings = true}
-            class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { showRecordings ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
+            onclick={() => activeView = 'recordings'}
+            class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { activeView === 'recordings' ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
           >
             <Icon name="calendar" size={18} />
             <span class="hidden md:inline">Recordings</span>
           </button>
         {/if}
+
+        {#if stream.face_detection_enabled}
+          <button
+            onclick={() => activeView = 'faces'}
+            class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { activeView === 'faces' ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
+          >
+            <Icon name="user" size={18} />
+            <span class="hidden md:inline">Faces</span>
+          </button>
+        {/if}
       </div>
 
       <div class="flex-1 overflow-hidden relative bg-black">
-        {#if showRecordings && stream.recording_enabled}
+        {#if activeView === 'recordings' && stream.recording_enabled}
           <div class="absolute inset-0 p-4 bg-[var(--color-bg-card)]">
             <RecordingsPanel streamId={stream.id} />
+          </div>
+        {:else if activeView === 'faces' && stream.face_detection_enabled}
+          <div class="absolute inset-0 p-4 bg-[var(--color-bg-card)] overflow-y-auto">
+            <FaceEventsPanel streamId={stream.id} />
           </div>
         {:else}
           <!-- LIVE VIEW -->

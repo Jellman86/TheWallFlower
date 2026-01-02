@@ -87,6 +87,10 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
+    # Run face pretraining scan (sync, but runs in background)
+    from app.services.detection.face_service import face_service
+    asyncio.to_thread(face_service.scan_known_faces)
+
     # Give go2rtc a moment to fully settle
     logger.info("Waiting for go2rtc to settle...")
     await asyncio.sleep(5)
@@ -1360,6 +1364,11 @@ app.mount("/api/faces/thumbnails", StaticFiles(directory=str(faces_path)), name=
 snapshots_path = Path(settings.data_path) / "snapshots"
 snapshots_path.mkdir(parents=True, exist_ok=True)
 app.mount("/api/snapshots", StaticFiles(directory=str(snapshots_path)), name="snapshots")
+
+# Mount embeddings directory for face crops
+embeddings_path = Path(settings.data_path) / "embeddings"
+embeddings_path.mkdir(parents=True, exist_ok=True)
+app.mount("/api/embeddings", StaticFiles(directory=str(embeddings_path)), name="embeddings")
 
 # Mount the frontend build directory - this must be LAST as it matches "/"
 frontend_path = Path(settings.frontend_path)

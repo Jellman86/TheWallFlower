@@ -213,6 +213,26 @@ export const faces = {
   },
 
   /**
+   * List face events.
+   */
+  async listEvents(faceId = null, streamId = null, limit = 50, offset = 0) {
+    let query = `?limit=${limit}&offset=${offset}`;
+    if (faceId !== null) query += `&face_id=${faceId}`;
+    if (streamId !== null) query += `&stream_id=${streamId}`;
+    
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/events/all${query}`);
+    return handleResponse(response);
+  },
+
+  /**
+   * List embeddings for a face.
+   */
+  async listEmbeddings(id) {
+    const response = await fetchWithTimeout(`${BASE_URL}/faces/${id}/embeddings`);
+    return handleResponse(response);
+  },
+
+  /**
    * Update a face.
    */
   async update(id, name, isKnown) {
@@ -247,6 +267,16 @@ export const faces = {
     return `${API_BASE}/snapshots/${name}`;
   },
   
+  /**
+   * Get embedding crop URL.
+   */
+  embeddingUrl(filename) {
+    if (!filename) return null;
+    const parts = filename.split('/');
+    const name = parts[parts.length - 1];
+    return `${API_BASE}/embeddings/${name}`;
+  },
+
   /**
    * Get thumbnail URL.
    */
