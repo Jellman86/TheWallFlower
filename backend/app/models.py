@@ -3,7 +3,7 @@
 import re
 from datetime import datetime
 from typing import Optional
-from pydantic import field_validator
+from pydantic import field_validator, ConfigDict
 from sqlmodel import Field, SQLModel
 
 
@@ -110,15 +110,28 @@ class Face(SQLModel, table=True):
     """Known (or Unknown) face stored in the database."""
     __tablename__ = "faces"
 
+    # Allow extra attributes for runtime embedding_numpy cache
+    model_config = ConfigDict(extra='allow')
+
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(default="Unknown", index=True)
     embedding: bytes  # Serialized numpy array (float32, 512 dimensions)
     thumbnail_path: Optional[str] = Field(default=None)
     first_seen: datetime = Field(default_factory=datetime.utcnow)
     last_seen: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # Simple boolean to mark if this face is 'known' (named by user)
     is_known: bool = Field(default=False)
+
+
+class FaceRead(SQLModel):
+    """Face response model (excludes binary embedding)."""
+    id: int
+    name: str
+    thumbnail_path: Optional[str]
+    first_seen: datetime
+    last_seen: datetime
+    is_known: bool
 
 
 class FaceEvent(SQLModel, table=True):

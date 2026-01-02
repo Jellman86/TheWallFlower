@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import os
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -603,10 +603,8 @@ async def stream_frame_proxy(stream_id: int):
 
 
 @app.websocket("/api/streams/{stream_id}/audio-levels")
-async def stream_audio_levels(websocket: "WebSocket", stream_id: int):
+async def stream_audio_levels(websocket: WebSocket, stream_id: int):
     """WebSocket endpoint for real-time audio levels (RMS, VAD)."""
-    from fastapi import WebSocket, WebSocketDisconnect
-    
     await websocket.accept()
     
     worker = stream_manager.get_worker(stream_id)

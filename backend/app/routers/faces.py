@@ -7,11 +7,11 @@ from datetime import datetime
 import os
 
 from app.db import get_session
-from app.models import Face, FaceEvent
+from app.models import Face, FaceRead, FaceEvent
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
 
-@router.get("", response_model=List[Face])
+@router.get("", response_model=List[FaceRead])
 def list_faces(
     known: Optional[bool] = None,
     limit: int = 50,
@@ -20,17 +20,17 @@ def list_faces(
 ):
     """List detected faces."""
     statement = select(Face)
-    
+
     if known is not None:
         statement = statement.where(Face.is_known == known)
-        
+
     # Sort by last seen descending (newest first)
     statement = statement.order_by(col(Face.last_seen).desc())
     statement = statement.offset(offset).limit(limit)
-    
+
     return session.exec(statement).all()
 
-@router.get("/{face_id}", response_model=Face)
+@router.get("/{face_id}", response_model=FaceRead)
 def get_face(face_id: int, session: Session = Depends(get_session)):
     """Get a specific face."""
     face = session.get(Face, face_id)
@@ -38,7 +38,7 @@ def get_face(face_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Face not found")
     return face
 
-@router.patch("/{face_id}", response_model=Face)
+@router.patch("/{face_id}", response_model=FaceRead)
 def update_face(
     face_id: int, 
     name: str = Query(None),
