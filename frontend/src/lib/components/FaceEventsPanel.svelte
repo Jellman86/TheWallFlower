@@ -11,19 +11,40 @@
 
   let events = $state([]);
   let isLoading = $state(true);
+  let isLoadingMore = $state(false);
+  let hasMore = $state(false);
+  let total = $state(0);
   let selectedEvent = $state(null);
 
-  async function loadEvents() {
-    isLoading = true;
+  async function loadEvents(reset = true) {
+    if (reset) {
+      isLoading = true;
+      events = [];
+    } else {
+      isLoadingMore = true;
+    }
+
     try {
-      events = await faces.listEvents(faceId, streamId, limit);
+      const offset = reset ? 0 : events.length;
+      const response = await faces.listEvents(faceId, streamId, limit, offset);
+      
+      if (reset) {
+        events = response.items;
+      } else {
+        events = [...events, ...response.items];
+      }
+      
+      total = response.total;
+      hasMore = response.has_more;
     } catch (e) {
       console.error('Failed to load face events:', e);
+    } finally {
+      isLoading = false;
+      isLoadingMore = false;
     }
-    isLoading = false;
   }
 
-  onMount(loadEvents);
+  onMount(() => loadEvents(true));
 
   function formatDate(dateStr) {
     const d = new Date(dateStr);
@@ -33,12 +54,15 @@
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
-    <h3 class="font-bold flex items-center gap-2">
-      <Icon name="history" size={18} />
-      Recent Detections
-    </h3>
+    <div>
+      <h3 class="font-bold flex items-center gap-2">
+        <Icon name="history" size={18} />
+        Recent Detections
+      </h3>
+      <p class="text-[10px] text-[var(--color-text-muted)] mt-0.5">Total: {total}</p>
+    </div>
     <button 
-      onclick={loadEvents}
+      onclick={() => loadEvents(true)}
       class="p-1.5 hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors"
       title="Refresh"
     >
@@ -55,7 +79,7 @@
       No recent detection events.
     </p>
   {:else}
-    <div class="grid grid-cols-1 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+    <div class="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
       {#each events as event (event.id)}
         <button
           onclick={() => selectedEvent = event}
@@ -89,6 +113,22 @@
           </div>
         </button>
       {/each}
+
+      {#if hasMore}
+        <button
+          onclick={() => loadEvents(false)}
+          disabled={isLoadingMore}
+          class="py-2 text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors flex items-center justify-center gap-2"
+        >
+          {#if isLoadingMore}
+            <Icon name="refresh" size={12} class="animate-spin" />
+            Loading more...
+          {:else}
+            <Icon name="chevron-down" size={12} />
+            Load More
+          {/if}
+        </button>
+      {/if}
     </div>
   {/if}
 </div>

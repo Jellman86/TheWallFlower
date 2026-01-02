@@ -7,21 +7,47 @@
 
   let faceList = $state([]);
   let isLoading = $state(true);
+  let isLoadingMore = $state(false);
   let filter = $state('all'); // 'all', 'known', 'unknown'
+  let total = $state(0);
+  let hasMore = $state(false);
+  let limit = 50;
 
-  async function loadFaces() {
-    isLoading = true;
+  async function loadFaces(reset = true) {
+    if (reset) {
+      isLoading = true;
+      faceList = [];
+    } else {
+      isLoadingMore = true;
+    }
+
     try {
       const known = filter === 'all' ? null : (filter === 'known');
-      faceList = await faces.list(known, 100);
+      const offset = reset ? 0 : faceList.length;
+      const response = await faces.list(known, limit, offset);
+      
+      if (reset) {
+        faceList = response.items;
+      } else {
+        faceList = [...faceList, ...response.items];
+      }
+      
+      total = response.total;
+      hasMore = response.has_more;
     } catch (e) {
       console.error('Failed to load faces:', e);
+    } finally {
+      isLoading = false;
+      isLoadingMore = false;
     }
-    isLoading = false;
+  }
+
+  function handleLoadMore() {
+    loadFaces(false);
   }
 
   $effect(() => {
-    loadFaces();
+    loadFaces(true);
   });
 </script>
 
@@ -30,10 +56,13 @@
   <div class="lg:col-span-3 space-y-6">
     <!-- Header -->
     <div class="flex items-center justify-between">
-      <h2 class="text-xl font-bold flex items-center gap-2">
-        <Icon name="users" size={24} />
-        Face Gallery
-      </h2>
+      <div>
+        <h2 class="text-xl font-bold flex items-center gap-2">
+          <Icon name="users" size={24} />
+          Face Gallery
+        </h2>
+        <p class="text-xs text-[var(--color-text-muted)] mt-1">Showing {faceList.length} of {total} faces</p>
+      </div>
       
       <!-- Filters -->
       <div class="flex bg-[var(--color-bg-dark)] rounded overflow-hidden text-sm">
@@ -73,11 +102,28 @@
         {#each faceList as face (face.id)}
           <FaceCard 
             {face} 
-            onUpdate={loadFaces}
-            onDelete={loadFaces}
+            onUpdate={() => loadFaces(true)}
+            onDelete={() => loadFaces(true)}
           />
         {/each}
       </div>
+
+      {#if hasMore}
+        <div class="flex justify-center pt-6">
+          <button
+            onclick={handleLoadMore}
+            disabled={isLoadingMore}
+            class="px-8 py-2 bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            {#if isLoadingMore}
+              <Icon name="refresh" size={16} class="animate-spin" />
+              Loading...
+            {:else}
+              Load More
+            {/if}
+          </button>
+        </div>
+      {/if}
     {/if}
   </div>
 

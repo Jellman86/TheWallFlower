@@ -202,6 +202,7 @@ export const transcripts = {
 export const faces = {
   /**
    * List faces.
+   * @returns {Promise<{items: Array, total: number, limit: number, offset: number, has_more: boolean}>}
    */
   async list(known = null, limit = 50, offset = 0) {
     let query = `?limit=${limit}&offset=${offset}`;
@@ -214,6 +215,7 @@ export const faces = {
 
   /**
    * List face events.
+   * @returns {Promise<{items: Array, total: number, limit: number, offset: number, has_more: boolean}>}
    */
   async listEvents(faceId = null, streamId = null, limit = 50, offset = 0) {
     let query = `?limit=${limit}&offset=${offset}`;
@@ -455,5 +457,5 @@ export async function fetchVersion() {
   } catch {
     // Ignore errors - return fallback
   }
-  return { version: "0.2.0", base_version: "0.2.0", git_hash: "unknown" };
+  return { version: "0.3.0", base_version: "0.3.0", git_hash: "unknown" };
 }

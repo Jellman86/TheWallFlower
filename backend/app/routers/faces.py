@@ -1,8 +1,8 @@
 """Faces API router."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, col
+from sqlmodel import Session, select, col, func
 from datetime import datetime
 import os
 
@@ -11,24 +11,35 @@ from app.models import Face, FaceRead, FaceEvent
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
 
-@router.get("", response_model=List[FaceRead])
+@router.get("", response_model=Dict[str, Any])
 def list_faces(
     known: Optional[bool] = None,
     limit: int = 50,
     offset: int = 0,
     session: Session = Depends(get_session)
 ):
-    """List detected faces."""
+    """List detected faces with pagination."""
     statement = select(Face)
+    count_statement = select(func.count()).select_from(Face)
 
     if known is not None:
         statement = statement.where(Face.is_known == known)
+        count_statement = count_statement.where(Face.is_known == known)
+
+    total = session.exec(count_statement).one()
 
     # Sort by last seen descending (newest first)
     statement = statement.order_by(col(Face.last_seen).desc())
     statement = statement.offset(offset).limit(limit)
+    items = session.exec(statement).all()
 
-    return session.exec(statement).all()
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total
+    }
 
 @router.get("/{face_id}", response_model=FaceRead)
 def get_face(face_id: int, session: Session = Depends(get_session)):
@@ -110,7 +121,7 @@ def list_face_embeddings(
         for e in results
     ]
 
-@router.get("/events/all", response_model=List[FaceEvent])
+@router.get("/events/all", response_model=Dict[str, Any])
 def list_face_events(
     face_id: Optional[int] = None,
     stream_id: Optional[int] = None,
@@ -118,17 +129,29 @@ def list_face_events(
     offset: int = 0,
     session: Session = Depends(get_session)
 ):
-    """List face detection events."""
+    """List face detection events with pagination."""
     statement = select(FaceEvent)
+    count_statement = select(func.count()).select_from(FaceEvent)
 
     if face_id is not None:
         statement = statement.where(FaceEvent.face_id == face_id)
+        count_statement = count_statement.where(FaceEvent.face_id == face_id)
     
     if stream_id is not None:
         statement = statement.where(FaceEvent.stream_id == stream_id)
+        count_statement = count_statement.where(FaceEvent.stream_id == stream_id)
+
+    total = session.exec(count_statement).one()
 
     # Sort by timestamp descending (newest first)
     statement = statement.order_by(col(FaceEvent.timestamp).desc())
     statement = statement.offset(offset).limit(limit)
+    items = session.exec(statement).all()
 
-    return session.exec(statement).all()
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total
+    }
