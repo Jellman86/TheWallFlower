@@ -615,33 +615,57 @@ class StreamWorker:
                 rms = np.sqrt(np.mean(samples ** 2))
                 max_val = np.max(np.abs(samples))
 
-                # Energy gating: Skip chunks below RMS threshold
-                if energy_threshold > 0 and rms < energy_threshold:
-                    chunks_skipped_energy += 1
-                    consecutive_silent += 1
+                # Update last_audio_time for ALL received audio (for watchdog)
+                with self._status_lock:
+                    self._status.last_audio_time = datetime.now()
 
-                    # Log occasionally when silent
-                    if consecutive_silent == 30:  # 30 seconds of silence
-                        logger.debug(f"Stream {self.config.id}: 30s of silence (RMS={rms:.4f})")
-                    continue
+                # Determine if audio will be skipped
+                skipped_energy = energy_threshold > 0 and rms < energy_threshold
+                speech_prob = None
+                skipped_vad = False
 
                 # Silero VAD: Check for speech if model is available
-                speech_prob = None
-                if vad_model is not None:
+                if not skipped_energy and vad_model is not None:
                     try:
                         import torch
                         # Silero expects normalized audio tensor
                         audio_tensor = torch.from_numpy(samples)
                         speech_prob = vad_model(audio_tensor, 16000).item()
-
-                        if speech_prob < vad_threshold:
-                            chunks_skipped_vad += 1
-                            consecutive_silent += 1
-                            continue
+                        skipped_vad = speech_prob < vad_threshold
                     except Exception as e:
                         # If VAD fails, fall through and send audio anyway
                         if chunks_sent == 0:
                             logger.warning(f"Stream {self.config.id}: Silero VAD error (continuing without VAD): {e}")
+
+                # Prepare metadata (ALWAYS, even for filtered chunks)
+                meta_data = {
+                    "rms": float(rms),
+                    "max": float(max_val),
+                    "speech_prob": float(speech_prob) if speech_prob is not None else 0.0,
+                    "skipped_energy": skipped_energy,
+                    "skipped_vad": skipped_vad,
+                }
+
+                # Broadcast to level subscribers (ALWAYS - so visualizer works)
+                for q in list(self._audio_level_queues):
+                    try:
+                        q.put_nowait(meta_data)
+                    except asyncio.QueueFull:
+                        pass  # Drop frames if client is slow
+
+                # Apply energy gating
+                if skipped_energy:
+                    chunks_skipped_energy += 1
+                    consecutive_silent += 1
+                    if consecutive_silent == 30:  # 30 seconds of silence
+                        logger.debug(f"Stream {self.config.id}: 30s of silence (RMS={rms:.4f})")
+                    continue
+
+                # Apply VAD gating
+                if skipped_vad:
+                    chunks_skipped_vad += 1
+                    consecutive_silent += 1
+                    continue
 
                 # Reset silence counter when we send audio
                 consecutive_silent = 0
@@ -656,22 +680,6 @@ class StreamWorker:
                         f"RMS={rms:.4f}, Max={max_val:.4f}"
                     )
 
-                # Prepare metadata
-                meta_data = {
-                    "rms": float(rms),
-                    "max": float(max_val),
-                    "speech_prob": float(speech_prob) if speech_prob is not None else 0.0,
-                    "skipped_energy": rms < energy_threshold if energy_threshold > 0 else False,
-                    "skipped_vad": speech_prob < vad_threshold if speech_prob is not None else False,
-                }
-
-                # Broadcast to level subscribers (metadata only)
-                for q in list(self._audio_level_queues):
-                    try:
-                        q.put_nowait(meta_data)
-                    except asyncio.QueueFull:
-                        pass # Drop frames if client is slow
-
                 # Send to audio preview queue if enabled (raw audio + metadata)
                 if self._audio_preview_enabled and self._audio_preview_queue is not None:
                     try:
@@ -685,9 +693,6 @@ class StreamWorker:
                         pass  # Drop if queue is full (client too slow)
 
                 await ws.send(audio_chunk)
-
-                with self._status_lock:
-                    self._status.last_audio_time = datetime.now()
 
             except Exception as e:
                 logger.error(f"Send audio error: {e}")

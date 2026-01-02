@@ -12,7 +12,6 @@ from sqlmodel import Session, select
 
 try:
     from insightface.app import FaceAnalysis
-    from insightface.data import Image
     INSIGHTFACE_AVAILABLE = True
 except ImportError:
     INSIGHTFACE_AVAILABLE = False

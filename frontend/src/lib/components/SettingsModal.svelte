@@ -1,8 +1,26 @@
 <script>
   import { streams, control } from '../services/api.js';
   import Icon from './Icons.svelte';
+  import Tooltip from './Tooltip.svelte';
   import AudioPreview from './AudioPreview.svelte';
   import AudioVisualizer from './AudioVisualizer.svelte';
+
+  // Tooltip texts for settings
+  const TOOLTIPS = {
+    streamName: 'A friendly name to identify this camera in the UI.',
+    rtspUrl: 'The RTSP stream URL from your camera. Check your camera documentation for the correct path.',
+    speechToText: 'Enables real-time speech transcription using WhisperLive AI. Audio is processed locally - nothing is sent to the cloud.',
+    saveTranscripts: 'Save transcripts to a text file for archival or external processing.',
+    faceDetection: 'Detect and identify faces using InsightFace AI. Runs locally on CPU. Unknown faces are saved for later identification.',
+    faceInterval: 'How often to capture a frame for face detection. Lower = more responsive but higher CPU usage.',
+    recording: 'Continuously record video to disk in 15-minute segments. Uses FFmpeg with zero-transcoding for minimal CPU usage.',
+    retention: 'How long to keep recordings before automatic deletion. Older files are removed hourly.',
+    energyGate: 'Filters out low-volume audio (background noise, silence). Higher values = more aggressive filtering. If speech is being missed, try lowering this.',
+    sileroVad: 'Uses a neural network to detect human speech vs. other sounds. More accurate than energy gating alone but uses more CPU.',
+    vadThreshold: 'How confident the AI must be that audio contains speech. Higher = fewer false positives but may miss quiet speech.',
+    vadOnset: 'How quickly VAD activates when speech starts. Lower = faster response.',
+    vadOffset: 'How long VAD waits after speech ends before deactivating. Higher = captures trailing words better.',
+  };
 
   let {
     stream = null,
@@ -282,7 +300,12 @@
           {#if activeTab === 'general'}
             <div class="space-y-5">
               <div>
-                <label for="name" class="block text-sm font-medium mb-2">Stream Name</label>
+                <label for="name" class="flex items-center gap-2 text-sm font-medium mb-2">
+                  Stream Name
+                  <Tooltip text={TOOLTIPS.streamName}>
+                    <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                  </Tooltip>
+                </label>
                 <input
                   type="text"
                   id="name"
@@ -293,7 +316,12 @@
               </div>
 
               <div>
-                <label for="rtsp" class="block text-sm font-medium mb-2">RTSP URL</label>
+                <label for="rtsp" class="flex items-center gap-2 text-sm font-medium mb-2">
+                  RTSP URL
+                  <Tooltip text={TOOLTIPS.rtspUrl}>
+                    <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                  </Tooltip>
+                </label>
                 <div class="flex gap-2">
                   <input
                     type="text"
@@ -375,6 +403,9 @@
                     <div class="flex items-center gap-2">
                       <Icon name="mic" size={18} class="text-[var(--color-primary)]" />
                       <span class="font-medium">Speech-to-Text</span>
+                      <Tooltip text={TOOLTIPS.speechToText}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
                     </div>
                     <p class="text-xs text-[var(--color-text-muted)] mt-1">
                       Transcribe audio using WhisperLive AI
@@ -419,6 +450,9 @@
                     <div class="flex items-center gap-2">
                       <Icon name="user" size={18} class="text-[var(--color-primary)]" />
                       <span class="font-medium">Face Detection</span>
+                      <Tooltip text={TOOLTIPS.faceDetection}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
                     </div>
                     <p class="text-xs text-[var(--color-text-muted)] mt-1">
                       Detect and identify faces using InsightFace
@@ -428,7 +462,12 @@
 
                 {#if faceDetectionEnabled}
                   <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
-                    <label for="face-interval" class="block text-sm mb-2">Detection Interval</label>
+                    <label for="face-interval" class="flex items-center gap-2 text-sm mb-2">
+                      Detection Interval
+                      <Tooltip text={TOOLTIPS.faceInterval}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
+                    </label>
                     <div class="flex items-center gap-3">
                       <input
                         type="range"
@@ -460,6 +499,9 @@
                     <div class="flex items-center gap-2">
                       <Icon name="video" size={18} class="text-[var(--color-primary)]" />
                       <span class="font-medium">24/7 Recording</span>
+                      <Tooltip text={TOOLTIPS.recording}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
                     </div>
                     <p class="text-xs text-[var(--color-text-muted)] mt-1">
                       Continuous recording in 15-minute segments
@@ -469,7 +511,12 @@
 
                 {#if recordingEnabled}
                   <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
-                    <label for="retention-days" class="block text-sm mb-2">Retention Period</label>
+                    <label for="retention-days" class="flex items-center gap-2 text-sm mb-2">
+                      Retention Period
+                      <Tooltip text={TOOLTIPS.retention}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
+                    </label>
                     <div class="flex items-center gap-3">
                       <input
                         type="range"
@@ -528,7 +575,12 @@
                 <!-- Energy Threshold -->
                 <div class="p-4 bg-[var(--color-bg-dark)]/30 rounded-lg border border-[var(--color-border)]">
                   <div class="flex items-center justify-between mb-3">
-                    <label for="energy-threshold" class="text-sm font-medium">Energy Gate</label>
+                    <label for="energy-threshold" class="flex items-center gap-2 text-sm font-medium">
+                      Energy Gate
+                      <Tooltip text={TOOLTIPS.energyGate}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
+                    </label>
                     <span class="text-xs font-mono px-2 py-1 bg-[var(--color-bg-dark)] rounded {audioEnergyThreshold !== null ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]'}">
                       {audioEnergyThreshold !== null ? audioEnergyThreshold.toFixed(3) : `${DEFAULTS.energy_threshold} (default)`}
                     </span>
@@ -559,6 +611,9 @@
                         class="w-4 h-4 accent-[var(--color-primary)]"
                       />
                       <span class="text-sm font-medium">Silero VAD</span>
+                      <Tooltip text={TOOLTIPS.sileroVad}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
                     </label>
                     <span class="text-xs px-2 py-1 rounded {audioVadEnabled !== null ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)]' : 'bg-[var(--color-bg-dark)] text-[var(--color-text-muted)]'}">
                       {audioVadEnabled !== null ? (audioVadEnabled ? 'Custom: On' : 'Custom: Off') : 'Default'}
@@ -572,7 +627,12 @@
                 <!-- VAD Threshold -->
                 <div class="p-4 bg-[var(--color-bg-dark)]/30 rounded-lg border border-[var(--color-border)]">
                   <div class="flex items-center justify-between mb-3">
-                    <label for="vad-threshold" class="text-sm font-medium">VAD Threshold</label>
+                    <label for="vad-threshold" class="flex items-center gap-2 text-sm font-medium">
+                      VAD Threshold
+                      <Tooltip text={TOOLTIPS.vadThreshold}>
+                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
+                      </Tooltip>
+                    </label>
                     <span class="text-xs font-mono px-2 py-1 bg-[var(--color-bg-dark)] rounded {audioVadThreshold !== null ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]'}">
                       {audioVadThreshold !== null ? audioVadThreshold.toFixed(2) : `${DEFAULTS.vad_threshold} (default)`}
                     </span>
@@ -600,7 +660,12 @@
                   </summary>
                   <div class="mt-3 grid grid-cols-2 gap-3">
                     <div class="p-3 bg-[var(--color-bg-dark)]/30 rounded-lg border border-[var(--color-border)]">
-                      <label for="vad-onset" class="block text-xs font-medium mb-2">VAD Onset</label>
+                      <label for="vad-onset" class="flex items-center gap-1 text-xs font-medium mb-2">
+                        VAD Onset
+                        <Tooltip text={TOOLTIPS.vadOnset} position="right">
+                          <Icon name="help-circle" size={12} class="text-[var(--color-text-muted)] cursor-help" />
+                        </Tooltip>
+                      </label>
                       <input
                         type="number"
                         id="vad-onset"
@@ -613,7 +678,12 @@
                       />
                     </div>
                     <div class="p-3 bg-[var(--color-bg-dark)]/30 rounded-lg border border-[var(--color-border)]">
-                      <label for="vad-offset" class="block text-xs font-medium mb-2">VAD Offset</label>
+                      <label for="vad-offset" class="flex items-center gap-1 text-xs font-medium mb-2">
+                        VAD Offset
+                        <Tooltip text={TOOLTIPS.vadOffset} position="left">
+                          <Icon name="help-circle" size={12} class="text-[var(--color-text-muted)] cursor-help" />
+                        </Tooltip>
+                      </label>
                       <input
                         type="number"
                         id="vad-offset"
