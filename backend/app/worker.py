@@ -212,8 +212,8 @@ class StreamWorker:
         # Audio preview/levels support
         # Multiple consumers can subscribe to audio levels (metadata)
         # Only one consumer can subscribe to audio preview (raw audio + metadata)
-        self._audio_preview_queue: Optional[asyncio.Queue] = None
-        self._audio_level_queues: set[asyncio.Queue] = set()
+        self._audio_preview_queue: Optional[tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = None
+        self._audio_level_queues: Dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._audio_preview_enabled = False
 
     def _get_audio_config(self) -> dict:
@@ -228,7 +228,8 @@ class StreamWorker:
 
     def enable_audio_preview(self, queue: asyncio.Queue) -> None:
         """Enable audio preview streaming (raw audio) to the provided queue."""
-        self._audio_preview_queue = queue
+        loop = asyncio.get_running_loop()
+        self._audio_preview_queue = (queue, loop)
         self._audio_preview_enabled = True
         logger.info(f"Stream {self.config.id}: Audio preview enabled")
 
@@ -240,11 +241,12 @@ class StreamWorker:
 
     def subscribe_audio_levels(self, queue: asyncio.Queue) -> None:
         """Subscribe to audio levels (metadata only) stream."""
-        self._audio_level_queues.add(queue)
+        loop = asyncio.get_running_loop()
+        self._audio_level_queues[queue] = loop
 
     def unsubscribe_audio_levels(self, queue: asyncio.Queue) -> None:
         """Unsubscribe from audio levels stream."""
-        self._audio_level_queues.discard(queue)
+        self._audio_level_queues.pop(queue, None)
     
     def _cleanup_ffmpeg(self, process: subprocess.Popen, timeout: int = 5):
         """Clean up FFmpeg process robustly."""
@@ -647,10 +649,10 @@ class StreamWorker:
                 }
 
                 # Broadcast to level subscribers (ALWAYS - so visualizer works)
-                for q in list(self._audio_level_queues):
+                for q, loop in list(self._audio_level_queues.items()):
                     try:
-                        q.put_nowait(meta_data)
-                    except asyncio.QueueFull:
+                        loop.call_soon_threadsafe(q.put_nowait, meta_data)
+                    except Exception:
                         pass  # Drop frames if client is slow
 
                 # Apply energy gating
@@ -683,13 +685,14 @@ class StreamWorker:
                 # Send to audio preview queue if enabled (raw audio + metadata)
                 if self._audio_preview_enabled and self._audio_preview_queue is not None:
                     try:
+                        q, loop = self._audio_preview_queue
                         # Send audio data with metadata for VU meter display
                         preview_data = {
                             "audio": audio_chunk,
                             **meta_data
                         }
-                        self._audio_preview_queue.put_nowait(preview_data)
-                    except asyncio.QueueFull:
+                        loop.call_soon_threadsafe(q.put_nowait, preview_data)
+                    except Exception:
                         pass  # Drop if queue is full (client too slow)
 
                 await ws.send(audio_chunk)
