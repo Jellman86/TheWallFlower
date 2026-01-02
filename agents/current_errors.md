@@ -1,0 +1,15 @@
+- [x] Face detections are showing within the user interface however there is no thumbnail. 
+  - *Root Cause:* NameError in `face_service.py` prevented saving for new faces; greedy root mount in `main.py` prevented serving for all faces.
+  - *Fix:* Fixed both in code. Thumbnails are now saved and served correctly.
+- [x] the audio histrogram is not showing anything in the settings panel.
+  - *Root Cause:* Silero VAD was receiving 16000 samples but expected 512, causing an error that blocked the broadcast of audio level metadata.
+  - *Fix:* Fixed in `worker.py` to process in 512-sample chunks. Histogram now shows live activity.
+- [x] 'NoneType' object does not support item assignment error in FaceService.
+  - *Root Cause:* Attempting to add attributes to a SQLModel instance.
+  - *Fix:* Replaced with a thread-safe `Dict` cache.
+- [x] Face snapshots look fine on filesystem but don't display in UI.
+  - *Root Cause:* Same as thumbnail issue (mount order in `main.py`).
+  - *Fix:* Moved root mount to the end of `main.py`. Snapshot viewer implemented.
+- [x] Migration failure: `sqlite3.OperationalError: table face_embeddings already exists`.
+  - *Root Cause:* Database was in an inconsistent state where the table existed but Alembic didn't know it was migrated.
+  - *Fix:* Made the `upgrade_face_recognition` migration idempotent (checks if tables/columns exist before creating). 
