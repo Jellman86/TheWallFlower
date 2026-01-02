@@ -43,6 +43,11 @@ class EventBroadcaster:
         # Global subscribers (receive all events)
         self._global_subscribers: Set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        """Set the event loop to use for broadcasting."""
+        self._loop = loop
 
     async def subscribe(self, stream_id: Optional[int] = None) -> asyncio.Queue:
         """Subscribe to events for a stream or all streams.
@@ -120,7 +125,14 @@ class EventBroadcaster:
 
         Use this from worker threads.
         """
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.broadcast(event))
+            )
+            return
+
         try:
+            # Fallback to current thread loop if no main loop registered
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 asyncio.run_coroutine_threadsafe(self.broadcast(event), loop)

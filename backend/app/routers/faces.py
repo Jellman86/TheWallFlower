@@ -8,10 +8,25 @@ import os
 
 from app.db import get_session
 from app.models import Face, FaceRead, FaceEvent
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/faces", tags=["faces"])
 
-@router.get("", response_model=Dict[str, Any])
+class FacePagination(BaseModel):
+    items: List[FaceRead]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+class EventPagination(BaseModel):
+    items: List[FaceEvent]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+@router.get("", response_model=FacePagination)
 def list_faces(
     known: Optional[bool] = None,
     limit: int = 50,
@@ -121,7 +136,7 @@ def list_face_embeddings(
         for e in results
     ]
 
-@router.get("/events/all", response_model=Dict[str, Any])
+@router.get("/events/all", response_model=EventPagination)
 def list_face_events(
     face_id: Optional[int] = None,
     stream_id: Optional[int] = None,

@@ -87,6 +87,10 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
+    # Register main loop for broadcaster
+    from app.services.event_broadcaster import event_broadcaster
+    event_broadcaster.set_loop(asyncio.get_running_loop())
+
     # Run face pretraining scan (sync, but runs in background)
     from app.services.detection.face_service import face_service
     asyncio.to_thread(face_service.scan_known_faces)

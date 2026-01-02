@@ -149,6 +149,7 @@ class FaceRead(SQLModel):
     first_seen: datetime
     last_seen: datetime
     is_known: bool
+    embedding_count: int = 1
 
 
 class FaceEvent(SQLModel, table=True):
