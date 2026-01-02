@@ -1,168 +1,103 @@
 # TheWallflower
 
-A self-hosted, containerized NVR (Network Video Recorder) that performs real-time Speech-to-Text on RTSP streams.
+A self-hosted, privacy-focused NVR (Network Video Recorder) with real-time Speech-to-Text and high-accuracy Face Recognition.
+
+> ⚠️ **Warning:** This project is under active, experimental development. Features change often, and the main branch is frequently broken. We prioritize moving fast and testing new AI integrations over stability at this stage. Use at your own risk.
+
+## Current Status: v0.3.0
+
+TheWallflower has evolved into a "Split-Pipeline" architecture, offloading heavy video tasks to `go2rtc` while the Python backend focuses on AI processing (Whisper + InsightFace).
 
 ## Features
 
-- **UI-First Configuration** - No YAML files needed. Add and manage cameras through the web interface.
-- **Real-time Speech-to-Text** - Powered by WhisperLive for live transcription of audio streams.
-- **MJPEG Video Streaming** - Low-latency video display in browser.
-- **Modular Architecture** - Extensible pipeline for future features (face detection, etc.)
-- **Graceful Shutdown** - Proper signal handling for clean container stops.
-- **Health Monitoring** - Built-in health checks for container orchestration.
+- **Low-Latency WebRTC** - Primary viewing via WebRTC for <100ms latency.
+- **24/7 Continuous Recording** - Zero-transcode (direct copy) segmented MP4 recording for maximum efficiency.
+- **Advanced Face Recognition** - Robust identity management using multi-embedding averages and local pretraining (`/data/faces/known/{name}/`).
+- **Real-time Speech-to-Text** - Transcription of RTSP audio streams powered by WhisperLive with aggressive anti-hallucination filtering.
+- **Audio Pre-filtering** - RMS Energy gating and Silero VAD (Voice Activity Detection) ensure Whisper only processes actual speech.
+- **Event Snapshots** - High-definition full-frame captures for every face detection event.
+- **UI-First Configuration** - No YAML files needed. Add and manage cameras through the modern Svelte 5 web interface.
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | Svelte 5 + TailwindCSS v4 (Vite) |
-| Backend | Python 3.11 + FastAPI + SQLModel |
-| Database | SQLite |
-| AI Engine | WhisperLive (external WebSocket) |
-| Container | Docker + Docker Compose |
+| Frontend | Svelte 5 (Runes) + TailwindCSS v4 |
+| Backend | FastAPI + SQLModel + Alembic |
+| Video Engine | go2rtc (Embedded) |
+| Speech AI | WhisperLive + Faster-Whisper + Silero VAD |
+| Vision AI | InsightFace (buffalo_l) + ONNX Runtime |
+| Database | SQLite (WAL Mode) |
+| Container | Docker (Multi-stage build) |
 
 ## Quick Start
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- NVIDIA GPU (optional, for faster Whisper inference)
+- Intel GPU (recommended for OpenVINO) or NVIDIA GPU
 
 ### Running with Docker Compose
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/TheWallflower.git
+git clone https://github.com/Jellman86/TheWallFlower.git
 cd TheWallflower
 
-# Copy and customize environment (optional)
+# Copy and customize environment (essential for WebRTC)
 cp .env.example .env
+# Edit .env and set WEBRTC_ADVERTISED_IP to your server's local IP
 
 # Start the services
 docker compose up -d
-
-# View logs
-docker compose logs -f
 ```
 
-The web UI will be available at `http://localhost:8080`
+The web UI will be available at `http://localhost:8953`
 
-### GPU Support (NVIDIA)
+### GPU Acceleration
 
-For GPU-accelerated Whisper inference, uncomment the GPU section in `docker-compose.yml`:
-
-```yaml
-whisper-live:
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: 1
-            capabilities: [gpu]
-```
-
-### Development Setup
-
-**Backend:**
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-# Start the backend (dev mode)
-uvicorn app.main:app --reload --port 8953
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+TheWallflower supports hardware acceleration for AI tasks:
+- **Intel iGPU:** Set `WHISPER_IMAGE` to the `openvino` variant in `.env`.
+- **NVIDIA GPU:** Set `WHISPER_IMAGE` to the `gpu` variant and uncomment the `deploy` section in `docker-compose.yml`.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        TheWallflower                             │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │   Frontend   │    │   Backend    │    │ WhisperLive  │      │
-│  │  (Svelte 5)  │◄──►│  (FastAPI)   │◄──►│   (GPU/CPU)  │      │
-│  └──────────────┘    └──────┬───────┘    └──────────────┘      │
-│                             │                                    │
-│                      ┌──────▼───────┐                           │
-│                      │   SQLite     │                           │
-│                      │  (streams.db)│                           │
-│                      └──────────────┘                           │
-├─────────────────────────────────────────────────────────────────┤
-│                        RTSP Cameras                              │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐                         │
-│  │ Camera1 │  │ Camera2 │  │ Camera3 │  ...                    │
-│  └─────────┘  └─────────┘  └─────────┘                         │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         TheWallflower Container                          │
+│                                                                          │
+│  ┌────────────────┐      ┌─────────────────┐      ┌─────────────────┐  │
+│  │    FastAPI     │◄────►│     go2rtc      │◄────►│   RTSP Camera   │  │
+│  │    Backend     │      │  (Video Engine) │      │                 │  │
+│  │    :8953       │      │  :8954/8955/8956│      │                 │  │
+└───────┬────────┘      └─────────────────┘      └─────────────────┘  │
+        │                                                              │
+        │ Audio Worker Pipeline:                                       │
+        │  FFmpeg ──► Bandpass ──► Energy Gate ──► Silero VAD          │
+        │                                                              │
+        ▼                                                              │
+┌────────────────┐                                                    │
+│  WhisperLive   │ ◄── Only verified speech chunks reach here        │
+│   (External)   │                                                    │
+│    :9090       │                                                    │
+└────────────────┘                                                    │
+                                                                       │
+        │ Face Worker Pipeline:                                        │
+        │  Fetch Frame ──► InsightFace ──► Identify ──► DB Event       │
+        │                                                              │
+        │ Recording Worker:                                            │
+        │  FFmpeg (Copy) ──► Segmented MP4s ──► /data/recordings       │
+        │                                                              │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## API Endpoints
+## Face Recognition Pretraining
 
-### Stream Configuration
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/streams` | List all stream configurations |
-| POST | `/api/streams` | Create a new stream |
-| GET | `/api/streams/{id}` | Get a specific stream |
-| PATCH | `/api/streams/{id}` | Update a stream |
-| DELETE | `/api/streams/{id}` | Delete a stream |
-
-### Stream Control
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/streams/{id}/start` | Start a stream worker |
-| POST | `/api/streams/{id}/stop` | Stop a stream worker |
-| POST | `/api/streams/{id}/restart` | Restart a stream worker |
-
-### Stream Status & Monitoring
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/streams/{id}/status` | Get status of a specific stream |
-| GET | `/api/status` | Get status of all streams |
-| GET | `/api/streams/{id}/transcripts` | Get recent transcripts |
-| GET | `/api/health` | Health check |
-
-### Video Streaming
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/video/{id}` | MJPEG video stream |
-| GET | `/api/snapshot/{id}` | Single JPEG snapshot |
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | External port for web UI |
-| `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `WORKERS` | `1` | Number of uvicorn workers |
-| `WHISPER_MODEL` | `base.en` | Whisper model to use |
-| `DATABASE_URL` | `sqlite:///data/thewallflower.db` | Database connection string |
-| `JPEG_QUALITY` | `80` | MJPEG stream quality (1-100) |
-
-See `.env.example` for all available options.
-
-## Configuration
-
-Streams are configured via the web UI. Each stream has:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| name | string | Display name for the stream |
-| rtsp_url | string | RTSP URL of the camera |
-| whisper_enabled | boolean | Enable speech-to-text |
-| face_detection_enabled | boolean | Enable face detection (future) |
+To skip the "Unknown" phase, you can pretrain the system with existing photos:
+1. Create a folder: `/data/faces/known/John_Smith/`
+2. Drop `.jpg` or `.png` photos of John into that folder.
+3. Restart the container.
+4. TheWallflower will automatically detect faces, generate embeddings, and register the identity.
 
 ## Project Structure
 
@@ -170,32 +105,23 @@ Streams are configured via the web UI. Each stream has:
 TheWallflower/
 ├── backend/
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py           # FastAPI application
-│   │   ├── config.py         # Environment configuration
-│   │   ├── db.py             # Database setup
-│   │   ├── models.py         # SQLModel schemas
-│   │   ├── processors.py     # Frame processors (MJPEG, snapshots)
-│   │   ├── stream_manager.py # Worker lifecycle management
-│   │   └── worker.py         # Stream worker (video/audio)
-│   └── requirements.txt
+│   │   ├── main.py           # FastAPI application & SSE
+│   │   ├── stream_manager.py # Worker lifecycle
+│   │   ├── worker.py         # Audio extraction & VAD
+│   │   ├── workers/          # Background tasks (Face, Recording)
+│   │   └── services/         # Business logic (Detection, Recording)
+│   └── migrations/           # Alembic DB migrations
 ├── frontend/
 │   ├── src/
-│   │   ├── App.svelte        # Main dashboard
-│   │   └── lib/
-│   │       ├── components/   # StreamCard, SettingsModal
-│   │       └── services/     # API client
-│   └── package.json
+│   │   ├── lib/
+│   │   │   ├── components/   # WebRTCPlayer, FaceCard, RecordingsPanel
+│   │   │   └── services/     # API client (api.js)
+│   └── public/
 ├── docker-compose.yml
 ├── Dockerfile
-├── docker-entrypoint.sh
-└── .env.example
+└── docker-entrypoint.sh
 ```
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
