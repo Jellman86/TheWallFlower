@@ -199,6 +199,17 @@ class StreamManager:
         except Exception as e:
             logger.error(f"go2rtc error for stream {stream_id}: {e}")
 
+        # Retry go2rtc registration a few times to handle cold starts
+        for attempt in range(1, 4):
+            try:
+                info = await self._go2rtc.get_stream_info(f"camera_{stream_id}")
+                if info and info.is_active:
+                    break
+                await self._add_stream_to_go2rtc(stream_id, rtsp_url)
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"go2rtc retry {attempt} failed for stream {stream_id}: {e}")
+
         with Session(engine) as session:
             config = session.get(StreamConfig, stream_id)
             if not config:

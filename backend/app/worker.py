@@ -47,6 +47,10 @@ ENERGY_THRESHOLD = float(os.getenv("AUDIO_ENERGY_THRESHOLD", "0.01"))
 SILERO_VAD_ENABLED = os.getenv("SILERO_VAD_ENABLED", "false").lower() in ("true", "1", "yes")
 SILERO_VAD_THRESHOLD = float(os.getenv("SILERO_VAD_THRESHOLD", "0.5"))
 
+# FFmpeg stall handling
+FFMPEG_READ_TIMEOUT = float(os.getenv("FFMPEG_READ_TIMEOUT", "5.0"))
+FFMPEG_MAX_SILENT_READS = int(os.getenv("FFMPEG_MAX_SILENT_READS", "3"))
+
 # Lazy-loaded Silero VAD model (shared across workers)
 _silero_vad_model = None
 _silero_vad_lock = threading.Lock()
@@ -407,6 +411,10 @@ class StreamWorker:
             except Exception as e:
                 logger.error(f"Audio loop error for stream {self.config.id}: {e}")
                 self._update_status(whisper_connected=False)
+                # Count a restart if FFmpeg was running when we hit an error
+                with self._status_lock:
+                    if self._ffmpeg_process is not None:
+                        self._status.ffmpeg_restarts += 1
 
             if not self._stop_event.is_set():
                 backoff_index = min(
@@ -600,14 +608,26 @@ class StreamWorker:
         if energy_threshold > 0:
             logger.info(f"Stream {self.config.id}: Energy gating enabled (threshold={energy_threshold})")
 
+        silent_reads = 0
         while not self._stop_event.is_set():
             if ffmpeg_process.poll() is not None:
                 break
 
             try:
-                audio_chunk = await asyncio.to_thread(ffmpeg_process.stdout.read, chunk_size)
+                audio_chunk = await asyncio.wait_for(
+                    asyncio.to_thread(ffmpeg_process.stdout.read, chunk_size),
+                    timeout=FFMPEG_READ_TIMEOUT
+                )
                 if not audio_chunk:
-                    break
+                    silent_reads += 1
+                    if silent_reads >= FFMPEG_MAX_SILENT_READS:
+                        logger.warning(
+                            f"Stream {self.config.id}: FFmpeg read stalled "
+                            f"({silent_reads} empty reads); restarting."
+                        )
+                        break
+                    continue
+                silent_reads = 0
 
                 # Convert to numpy for analysis
                 samples = np.frombuffer(audio_chunk, dtype=np.float32)
@@ -710,6 +730,14 @@ class StreamWorker:
 
                 await ws.send(audio_chunk)
 
+            except asyncio.TimeoutError:
+                silent_reads += 1
+                logger.warning(
+                    f"Stream {self.config.id}: FFmpeg read timeout "
+                    f"({silent_reads}/{FFMPEG_MAX_SILENT_READS})"
+                )
+                if silent_reads >= FFMPEG_MAX_SILENT_READS:
+                    break
             except Exception as e:
                 logger.error(f"Send audio error: {e}")
                 break
