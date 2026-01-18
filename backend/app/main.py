@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Run face pretraining scan (sync, but runs in background)
     from app.services.detection.face_service import face_service
-    asyncio.to_thread(face_service.scan_known_faces)
+    asyncio.create_task(asyncio.to_thread(face_service.scan_known_faces))
 
     # Give go2rtc a moment to fully settle
     logger.info("Waiting for go2rtc to settle...")
@@ -1287,9 +1287,32 @@ async def stream_events(stream_id: int):
 # =============================================================================
 
 @app.get("/api/health")
-def health_check():
+async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "service": "thewallflower"}
+    async def check_tcp(host: str, port: int, timeout: float = 2.0) -> bool:
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=timeout
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except Exception:
+            return False
+
+    go2rtc_ok = await stream_manager.go2rtc.health_check()
+    whisper_ok = await check_tcp(settings.whisper_host, settings.whisper_port)
+    status = "healthy" if go2rtc_ok and whisper_ok else "degraded"
+
+    return {
+        "status": status,
+        "service": "thewallflower",
+        "dependencies": {
+            "go2rtc": go2rtc_ok,
+            "whisper": whisper_ok,
+        },
+    }
 
 
 @app.get("/api/metrics")
@@ -1312,7 +1335,7 @@ def get_metrics():
     total_audio_connected = 0
     total_whisper_connected = 0
 
-    for worker in workers:
+    for worker in workers.values():
         status = worker.status
         stream_info = {
             "stream_id": status.stream_id,
