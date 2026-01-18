@@ -17,3 +17,4 @@ onnxruntime>=1.16.0
 
 # Face Detection & Recognition
 insightface>=0.7.3
+jiwer>=3.0.0
