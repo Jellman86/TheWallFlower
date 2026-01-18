@@ -516,12 +516,12 @@ class StreamWorker:
                     "initial_prompt": "Silence.",
                     "chunk_size": 1.0,
                     "condition_on_previous_text": False,
-                    # Anti-hallucination parameters
-                    "beam_size": 1,  # Greedy decoding = lowest hallucination
-                    "temperature": 0.0,  # Deterministic output
-                    "logprob_threshold": -1.0,  # Stricter confidence filtering
-                    "no_speech_threshold": 0.6,  # More conservative silence detection
-                    "compression_ratio_threshold": 1.35,  # Filter repetitive outputs
+                    # Parameters tuned for better accuracy on natural language
+                    "beam_size": 5,
+                    "temperature": [0.0, 0.2, 0.4, 0.6, 0.8],
+                    "logprob_threshold": -1.0,
+                    "no_speech_threshold": 0.6,
+                    "compression_ratio_threshold": 1.35,
                 }
                 await ws.send(json.dumps(config_msg))
                 logger.info(f"Handshake sent (vad_onset={audio_cfg['vad_onset']}, vad_offset={audio_cfg['vad_offset']}) for stream {self.config.id}")
