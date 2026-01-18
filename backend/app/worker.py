@@ -152,6 +152,7 @@ class StreamStatus:
     audio_thread_alive: bool = False
     ffmpeg_restarts: int = 0
     whisper_reconnects: int = 0
+    watchdog_restarts: int = 0
     last_frame_time: Optional[datetime] = None  # Deprecated - kept for API compatibility
     last_audio_time: Optional[datetime] = None
     # Connection tracking for audio/Whisper
@@ -292,6 +293,7 @@ class StreamWorker:
             "audio_thread_alive": status.audio_thread_alive,
             "ffmpeg_restarts": status.ffmpeg_restarts,
             "whisper_reconnects": status.whisper_reconnects,
+            "watchdog_restarts": status.watchdog_restarts,
             "connection_state": status.connection_state.value,
             "retry_count": status.retry_count,
             "next_retry_time": status.next_retry_time.isoformat() if status.next_retry_time else None,

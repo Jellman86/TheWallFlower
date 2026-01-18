@@ -1346,6 +1346,7 @@ def get_metrics():
             "connection_state": status.connection_state.value if status.connection_state else "unknown",
             "ffmpeg_restarts": status.ffmpeg_restarts,
             "whisper_reconnects": status.whisper_reconnects,
+            "watchdog_restarts": status.watchdog_restarts,
             "last_audio_time": status.last_audio_time.isoformat() if status.last_audio_time else None,
         }
         stream_metrics.append(stream_info)

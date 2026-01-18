@@ -461,6 +461,10 @@ class StreamManager:
                      try:
                          worker.stop()
                          worker.start()
+                         worker._update_status(
+                             watchdog_restarts=worker.status.watchdog_restarts + 1
+                         )
+                         worker._emit_status_event()
                          logger.info(f"Stream {stream_id}: Worker restarted successfully by watchdog.")
                      except Exception as e:
                          logger.error(f"Stream {stream_id}: Failed to watchdog-restart: {e}")
