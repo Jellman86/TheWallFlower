@@ -89,6 +89,10 @@ function createStreamStore() {
       eventSource.close();
       eventSource = null;
     }
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     connectionStatus = 'disconnected';
   }
   

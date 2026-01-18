@@ -9,10 +9,17 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/debug", tags=["debug"])
+def require_debug_enabled():
+    """Block debug routes unless explicitly enabled."""
+    enabled = os.getenv("DEBUG_API_ENABLED", "false").lower() in ("true", "1", "yes")
+    if not enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+router = APIRouter(prefix="/api/debug", tags=["debug"], dependencies=[Depends(require_debug_enabled)])
 
 
 class ServiceCheck(BaseModel):

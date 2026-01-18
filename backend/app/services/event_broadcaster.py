@@ -44,6 +44,9 @@ class EventBroadcaster:
         self._global_subscribers: Set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Backpressure metrics
+        self._dropped_by_stream: Dict[int, int] = {}
+        self._dropped_global: int = 0
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         """Set the event loop to use for broadcasting."""
@@ -103,6 +106,9 @@ class EventBroadcaster:
                         queue.put_nowait(event)
                     except asyncio.QueueFull:
                         dead_queues.append(queue)
+                        self._dropped_by_stream[event.stream_id] = (
+                            self._dropped_by_stream.get(event.stream_id, 0) + 1
+                        )
                         logger.warning(f"SSE queue full for stream {event.stream_id}")
 
                 for q in dead_queues:
@@ -115,6 +121,7 @@ class EventBroadcaster:
                     queue.put_nowait(event)
                 except asyncio.QueueFull:
                     dead_queues.append(queue)
+                    self._dropped_global += 1
                     logger.warning("Global SSE queue full")
 
             for q in dead_queues:
@@ -185,6 +192,14 @@ class EventBroadcaster:
         for subs in self._subscribers.values():
             count += len(subs)
         return count
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get SSE backpressure and subscriber metrics."""
+        return {
+            "subscriber_count": self.subscriber_count,
+            "dropped_by_stream": dict(self._dropped_by_stream),
+            "dropped_global": self._dropped_global,
+        }
 
 
 # Global singleton

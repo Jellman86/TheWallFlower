@@ -339,6 +339,29 @@ class StreamManager:
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def refresh_go2rtc_status(self) -> None:
+        """Refresh video_connected status for running streams via go2rtc."""
+        try:
+            is_healthy = await self._go2rtc.health_check()
+            if not is_healthy:
+                logger.warning("go2rtc health check failed; marking video as disconnected")
+                with self._workers_lock:
+                    for worker in self._workers.values():
+                        worker._update_status(video_connected=False)
+                return
+
+            streams_info = await self._go2rtc.get_streams()
+        except Exception as e:
+            logger.error(f"Failed to refresh go2rtc status: {e}")
+            return
+
+        with self._workers_lock:
+            for stream_id, worker in self._workers.items():
+                stream_name = self._go2rtc.get_stream_name(stream_id)
+                info = streams_info.get(stream_name, {})
+                has_producer = bool(info.get("producers"))
+                worker._update_status(video_connected=has_producer)
+
     async def start_all(self) -> None:
         logger.info("Starting all streams")
         with Session(engine) as session:

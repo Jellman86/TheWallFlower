@@ -117,6 +117,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(60) # Every minute
                 if not stream_manager.is_shutting_down:
                     logger.debug("Running background stream sync...")
+                    await stream_manager.refresh_go2rtc_status()
                     await stream_manager.reload_all()
                     
                     # Run recording cleanup
@@ -1362,6 +1363,7 @@ def get_metrics():
     return {
         "timestamp": datetime.now().isoformat(),
         "service": "thewallflower",
+        "sse": event_broadcaster.get_metrics(),
         "config": {
             "energy_threshold": ENERGY_THRESHOLD,
             "silero_vad_enabled": SILERO_VAD_ENABLED,
