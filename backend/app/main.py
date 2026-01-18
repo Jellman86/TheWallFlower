@@ -37,6 +37,7 @@ from app.services.recording_service import recording_service
 from app.routers import debug as debug_router
 from app.routers import faces as faces_router
 from app.routers import recordings as recordings_router
+from app.routers import tuner as tuner_router
 import os
 
 # Configure logging
@@ -165,6 +166,7 @@ app.add_middleware(
 app.include_router(debug_router.router)
 app.include_router(faces_router.router)
 app.include_router(recordings_router.router)
+app.include_router(tuner_router.router)
 
 
 # =============================================================================

@@ -228,3 +228,75 @@ class Recording(SQLModel, table=True):
     
     retention_locked: bool = Field(default=False)  # If True, auto-cleanup will skip this
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# Tuning Models
+# =============================================================================
+
+class TuningSample(SQLModel, table=True):
+    """Audio sample for transcription tuning."""
+    __tablename__ = "tuning_samples"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    filename: str  # e.g., "sample_123.wav"
+    original_transcript: Optional[str] = None  # The initial guess
+    ground_truth: Optional[str] = None  # The corrected text
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    duration_seconds: float = 0.0
+
+
+class TuningRun(SQLModel, table=True):
+    """Results of a tuning run."""
+    __tablename__ = "tuning_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    sample_id: int = Field(foreign_key="tuning_samples.id", index=True)
+    
+    # Parameters used
+    beam_size: int
+    temperature: str  # JSON string of the temp array or single float
+    vad_threshold: float
+    
+    # Result
+    transcription: str
+    wer: float  # Word Error Rate (lower is better)
+    execution_time: float
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# Tuning Models
+# =============================================================================
+
+class TuningSample(SQLModel, table=True):
+    """Audio sample for transcription tuning."""
+    __tablename__ = "tuning_samples"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    filename: str  # e.g., "sample_123.wav"
+    original_transcript: Optional[str] = None  # The initial guess
+    ground_truth: Optional[str] = None  # The corrected text
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    duration_seconds: float = 0.0
+
+
+class TuningRun(SQLModel, table=True):
+    """Results of a tuning run."""
+    __tablename__ = "tuning_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    sample_id: int = Field(foreign_key="tuning_samples.id", index=True)
+    
+    # Parameters used
+    beam_size: int
+    temperature: str  # JSON string of the temp array or single float
+    vad_threshold: float
+    
+    # Result
+    transcription: str
+    wer: float  # Word Error Rate (lower is better)
+    execution_time: float
+    
+    created_at: datetime = Field(default_factory=datetime.utcnow)

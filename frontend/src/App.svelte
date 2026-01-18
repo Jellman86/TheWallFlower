@@ -7,6 +7,7 @@
   import StatsPanel from './lib/components/StatsPanel.svelte';
   import Icon from './lib/components/Icons.svelte';
   import Faces from './lib/pages/Faces.svelte';
+  import Tuning from './lib/pages/Tuning.svelte';
 
   // State
   let streamList = $state([]);
@@ -132,6 +133,14 @@
           >
             <Icon name="grid" size={16} />
             <span class="hidden sm:inline">Dashboard</span>
+          </button>
+          <button
+            onclick={() => currentPage = 'tuning'}
+            class="px-3 py-2 md:px-4 {currentPage === 'tuning' ? 'bg-[var(--color-primary)]' : 'hover:bg-[var(--color-bg-hover)]'} transition-colors flex items-center gap-2"
+            title="Tuning"
+          >
+            <Icon name="settings" size={16} />
+            <span class="hidden sm:inline">Tuning</span>
           </button>
           <button
             onclick={() => currentPage = 'faces'}
