@@ -50,6 +50,7 @@ class Settings:
     
     # Storage
     data_path: str = "/data"
+    face_snapshot_retention_days: int = 7
 
 
 def get_data_path() -> str:
@@ -85,6 +86,10 @@ def get_settings() -> Settings:
         
         # Storage
         data_path=data_path,
+        face_snapshot_retention_days=int(os.getenv(
+            "FACE_SNAPSHOT_RETENTION_DAYS",
+            str(Settings.face_snapshot_retention_days)
+        )),
 
         # WhisperLive
         whisper_host=os.getenv("WHISPER_HOST", Settings.whisper_host),

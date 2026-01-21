@@ -118,6 +118,7 @@ class StreamManager:
     def _cleanup_loop(self) -> None:
         """Periodically purge old records from database."""
         from app.services.transcript_service import transcript_service
+        from app.services.detection.face_service import face_service
 
         # Initial wait to let system settle
         time.sleep(60)
@@ -126,8 +127,11 @@ class StreamManager:
             try:
                 # Cleanup transcripts older than 7 days or more than 5000 per stream
                 transcript_service.cleanup_old(max_age_days=7, max_per_stream=5000)
+                face_service.cleanup_old_events(
+                    max_age_days=settings.face_snapshot_retention_days
+                )
             except Exception as e:
-                logger.error(f"Transcript cleanup error: {e}")
+                logger.error(f"Cleanup error: {e}")
 
             # Sleep for 1 hour between cleanup cycles
             for _ in range(60 * 6):  # 1 hour in 10s increments

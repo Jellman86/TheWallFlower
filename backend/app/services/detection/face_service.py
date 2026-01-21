@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 import pickle
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict
 from sqlmodel import Session, select
 
@@ -286,6 +286,35 @@ class FaceService:
         except Exception as e:
             logger.error(f"Failed to save snapshot: {e}")
         return None
+
+    def cleanup_old_events(self, max_age_days: int = 7) -> int:
+        """Delete old face events and their snapshots to control disk usage."""
+        if max_age_days <= 0:
+            return 0
+
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        deleted = 0
+
+        with Session(engine) as session:
+            events = session.exec(
+                select(FaceEvent).where(FaceEvent.timestamp < cutoff)
+            ).all()
+
+            for event in events:
+                if event.snapshot_path and os.path.exists(event.snapshot_path):
+                    try:
+                        os.remove(event.snapshot_path)
+                    except Exception:
+                        pass
+                session.delete(event)
+                deleted += 1
+
+            if deleted:
+                session.commit()
+
+        if deleted:
+            logger.info(f"Deleted {deleted} face events older than {max_age_days} days")
+        return deleted
 
     def scan_known_faces(self):
         """Scan /data/faces/known/{name}/ for images to pre-train the model."""
