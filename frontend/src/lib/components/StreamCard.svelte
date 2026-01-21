@@ -3,6 +3,7 @@
   import { streamEvents } from '../stores/streamEvents.svelte.js';
   import Icon from './Icons.svelte';
   import WebRTCPlayer from './WebRTCPlayer.svelte';
+  import FaceOverlay from './FaceOverlay.svelte';
 
   import AudioVisualizer from './AudioVisualizer.svelte';
   import TranscriptPanel from './TranscriptPanel.svelte';
@@ -21,9 +22,16 @@
   // Use global store for status and transcripts
   let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
   let transcriptList = $derived(stream && stream.id ? streamEvents.getTranscripts(stream.id) : []);
+  let faceEvents = $derived(stream && stream.id ? streamEvents.getFaces(stream.id) : []);
 
   let isLoading = $state(false);
   let showTranscripts = $state(true);
+  let showFaceOverlay = $state(true);
+  let videoContainer;
+  let containerWidth = $state(0);
+  let containerHeight = $state(0);
+  let videoWidth = $state(0);
+  let videoHeight = $state(0);
 
   // WebRTC State
   let webrtcStatus = $state('connecting'); // connecting, connected, error
@@ -58,6 +66,27 @@
   function handleWebRTCStatus(status) {
     webrtcStatus = status;
   }
+
+  function handleVideoMetrics(metrics) {
+    videoWidth = metrics.width || 0;
+    videoHeight = metrics.height || 0;
+  }
+
+  let resizeObserver;
+  $effect(() => {
+    if (!videoContainer) return;
+    if (!resizeObserver) {
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry?.contentRect) {
+          containerWidth = entry.contentRect.width;
+          containerHeight = entry.contentRect.height;
+        }
+      });
+    }
+    resizeObserver.observe(videoContainer);
+    return () => resizeObserver?.disconnect();
+  });
 
   async function fetchStatus() {
     try {
@@ -102,6 +131,7 @@
     try {
       await control.restart(stream.id);
       streamEvents.clearTranscripts(stream.id);
+      streamEvents.clearFaces(stream.id);
       await fetchStatus();
     } catch (e) {
       console.error('Failed to restart stream:', e);
@@ -188,7 +218,7 @@
           <!-- LIVE VIEW -->
           <div class="flex flex-col h-full">
             <!-- Video Player -->
-            <div class="relative bg-black flex-1 min-h-[300px]">
+            <div class="relative bg-black flex-1 min-h-[300px]" bind:this={videoContainer}>
               {#if !isRunning}
                  <div class="absolute inset-0 flex items-center justify-center">
                     <div class="text-[var(--color-text-muted)] flex flex-col items-center">
@@ -197,7 +227,21 @@
                     </div>
                  </div>
               {:else}
-                <WebRTCPlayer streamId={stream.id} onStatusChange={handleWebRTCStatus} />
+                <WebRTCPlayer
+                  streamId={stream.id}
+                  onStatusChange={handleWebRTCStatus}
+                  onVideoMetrics={handleVideoMetrics}
+                />
+                {#if stream.face_detection_enabled && showFaceOverlay}
+                  <FaceOverlay
+                    faces={faceEvents}
+                    containerWidth={containerWidth}
+                    containerHeight={containerHeight}
+                    videoWidth={videoWidth}
+                    videoHeight={videoHeight}
+                    showUnknown={true}
+                  />
+                {/if}
               {/if}
             </div>
 
@@ -209,6 +253,14 @@
                  {:else}
                   <button onclick={handleStop} class="px-2 py-1 text-xs rounded bg-[var(--color-danger)] hover:opacity-80 transition-opacity">Stop</button>
                   <button onclick={handleRestart} class="px-2 py-1 text-xs rounded bg-[var(--color-warning)] hover:opacity-80 transition-opacity">Restart</button>
+                 {/if}
+                 {#if stream.face_detection_enabled}
+                  <button
+                    onclick={() => showFaceOverlay = !showFaceOverlay}
+                    class="px-2 py-1 text-xs rounded bg-[var(--color-bg-dark)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  >
+                    {showFaceOverlay ? 'Hide Faces' : 'Show Faces'}
+                  </button>
                  {/if}
                </div>
                <div class="flex-1 overflow-y-auto p-2">
@@ -227,7 +279,7 @@
 
   {:else}
     <!-- GRID VIEW (Legacy Card) -->
-    <div class="relative aspect-video bg-black group">
+    <div class="relative aspect-video bg-black group" bind:this={videoContainer}>
       {#if !isRunning}
          <div class="absolute inset-0 flex items-center justify-center">
             <div class="text-[var(--color-text-muted)] flex flex-col items-center">
@@ -239,7 +291,18 @@
         <WebRTCPlayer
           streamId={stream.id}
           onStatusChange={handleWebRTCStatus}
+          onVideoMetrics={handleVideoMetrics}
         />
+        {#if stream.face_detection_enabled && showFaceOverlay}
+          <FaceOverlay
+            faces={faceEvents}
+            containerWidth={containerWidth}
+            containerHeight={containerHeight}
+            videoWidth={videoWidth}
+            videoHeight={videoHeight}
+            showUnknown={true}
+          />
+        {/if}
       {/if}
 
       <!-- Whisper indicator -->

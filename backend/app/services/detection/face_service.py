@@ -242,13 +242,23 @@ class FaceService:
                     snapshot_filename = f"event_{int(time.time())}_{face_id}.jpg"
                     snapshot_path = self._save_snapshot(img, snapshot_filename)
 
+                    bbox = face.bbox.astype(int)
+                    x1, y1, x2, y2 = bbox
+                    frame_h, frame_w = img.shape[:2]
+
                     # Create Event
                     event = FaceEvent(
                         stream_id=stream_id,
                         face_id=face_id,
                         confidence=confidence,
                         face_name=name,
-                        snapshot_path=snapshot_path
+                        snapshot_path=snapshot_path,
+                        bbox_x1=int(x1),
+                        bbox_y1=int(y1),
+                        bbox_x2=int(x2),
+                        bbox_y2=int(y2),
+                        frame_width=int(frame_w),
+                        frame_height=int(frame_h),
                     )
                     session.add(event)
                     events.append(event)

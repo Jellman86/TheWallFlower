@@ -93,7 +93,13 @@ class FaceDetectionWorker:
                                     "face_name": event.face_name,
                                     "confidence": event.confidence,
                                     "timestamp": event.timestamp.isoformat(),
-                                    "snapshot_path": event.snapshot_path
+                                    "snapshot_path": event.snapshot_path,
+                                    "bbox_x1": event.bbox_x1,
+                                    "bbox_y1": event.bbox_y1,
+                                    "bbox_x2": event.bbox_x2,
+                                    "bbox_y2": event.bbox_y2,
+                                    "frame_width": event.frame_width,
+                                    "frame_height": event.frame_height,
                                 })
                         
                         self.last_detection_time = datetime.now()

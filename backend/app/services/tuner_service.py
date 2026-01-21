@@ -15,7 +15,7 @@ import jiwer
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import TuningSample, TuningRun
+from app.models import TuningSample, TuningRun, StreamConfig
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -166,5 +166,40 @@ class TunerService:
                         session.commit()
         
         logger.info(f"Sweep completed for sample {sample_id}")
+
+    def apply_best_to_stream(self, sample_id: int, stream_id: int) -> Optional[Dict[str, Any]]:
+        """Apply the best tuning run to a stream's Whisper settings."""
+        with Session(engine) as session:
+            best_run = session.exec(
+                select(TuningRun)
+                .where(TuningRun.sample_id == sample_id)
+                .order_by(TuningRun.wer.asc())
+                .limit(1)
+            ).first()
+            if not best_run:
+                return None
+
+            stream = session.get(StreamConfig, stream_id)
+            if not stream:
+                return None
+
+            stream.whisper_beam_size = best_run.beam_size
+            stream.whisper_temperature = best_run.temperature
+            stream.whisper_no_speech_threshold = best_run.vad_threshold
+            stream.whisper_logprob_threshold = -1.0
+            stream.whisper_condition_on_previous_text = False
+            stream.updated_at = datetime.utcnow()
+
+            session.add(stream)
+            session.commit()
+
+            return {
+                "beam_size": best_run.beam_size,
+                "temperature": best_run.temperature,
+                "no_speech_threshold": best_run.vad_threshold,
+                "logprob_threshold": -1.0,
+                "condition_on_previous_text": False,
+                "wer": best_run.wer,
+            }
 
 tuner_service = TunerService()

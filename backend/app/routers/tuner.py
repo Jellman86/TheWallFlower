@@ -19,6 +19,7 @@ router = APIRouter(prefix="/tuning", tags=["tuning"])
 async def create_sample(
     file: UploadFile = File(...),
     ground_truth: Optional[str] = Form(None),
+    stream_id: Optional[int] = Form(None),
     session: Session = Depends(get_session)
 ):
     """Upload a new audio sample for tuning."""
@@ -34,6 +35,7 @@ async def create_sample(
     sample = TuningSample(
         filename=filename,
         ground_truth=ground_truth,
+        stream_id=stream_id,
         original_transcript="" # Could run a default pass here
     )
     
@@ -48,7 +50,8 @@ def list_samples(session: Session = Depends(get_session)):
     return session.exec(select(TuningSample).order_by(TuningSample.created_at.desc())).all()
 
 class UpdateSampleRequest(BaseModel):
-    ground_truth: str
+    ground_truth: Optional[str] = None
+    stream_id: Optional[int] = None
 
 @router.put("/samples/{sample_id}", response_model=TuningSample)
 def update_sample(
@@ -61,7 +64,10 @@ def update_sample(
     if not sample:
         raise HTTPException(status_code=404, detail="Sample not found")
     
-    sample.ground_truth = request.ground_truth
+    if request.ground_truth is not None:
+        sample.ground_truth = request.ground_truth
+    if request.stream_id is not None:
+        sample.stream_id = request.stream_id
     session.add(sample)
     session.commit()
     session.refresh(sample)
@@ -83,6 +89,24 @@ def run_tuning(
 
     background_tasks.add_task(tuner_service.run_sweep, sample_id)
     return {"status": "started", "sample_id": sample_id}
+
+
+@router.post("/samples/{sample_id}/apply-best")
+def apply_best_tuning(
+    sample_id: int,
+    session: Session = Depends(get_session)
+):
+    """Apply best tuning run to the sample's stream."""
+    sample = session.get(TuningSample, sample_id)
+    if not sample:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    if not sample.stream_id:
+        raise HTTPException(status_code=400, detail="Sample is not assigned to a stream")
+
+    result = tuner_service.apply_best_to_stream(sample_id, sample.stream_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No tuning runs found")
+    return {"status": "applied", "stream_id": sample.stream_id, "params": result}
 
 @router.get("/samples/{sample_id}/runs", response_model=List[TuningRun])
 def list_runs(

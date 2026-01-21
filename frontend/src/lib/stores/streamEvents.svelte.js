@@ -9,6 +9,7 @@ function createStreamStore() {
   let connectionStatus = $state('disconnected');
   let streamStatuses = $state({}); // stream_id -> status object
   let streamTranscripts = $state({}); // stream_id -> Array<transcript>
+  let streamFaces = $state({}); // stream_id -> Array<face event>
   
   let eventSource = null;
   let reconnectTimeout = null;
@@ -71,6 +72,20 @@ function createStreamStore() {
       }
     });
 
+    eventSource.addEventListener('face', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const { stream_id, data: faceEvent } = payload;
+        if (stream_id) {
+          const currentFaces = streamFaces[stream_id] || [];
+          const updatedFaces = [faceEvent, ...currentFaces].slice(0, 20);
+          streamFaces = { ...streamFaces, [stream_id]: updatedFaces };
+        }
+      } catch (e) {
+        console.error('Failed to parse face event:', e);
+      }
+    });
+
     eventSource.onerror = (err) => {
       console.error('Global SSE error:', err);
       connectionStatus = 'error';
@@ -103,14 +118,22 @@ function createStreamStore() {
     }
   }
 
+  function clearFaces(streamId) {
+    if (streamFaces[streamId]) {
+      streamFaces = { ...streamFaces, [streamId]: [] };
+    }
+  }
+
   return {
     get connectionStatus() { return connectionStatus; },
     get allStatuses() { return streamStatuses; },
     getStreamStatus: (id) => streamStatuses[id],
     getTranscripts: (id) => streamTranscripts[id] || [],
+    getFaces: (id) => streamFaces[id] || [],
     connect,
     disconnect,
-    clearTranscripts
+    clearTranscripts,
+    clearFaces
   };
 }
 

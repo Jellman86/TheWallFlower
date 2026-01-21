@@ -7,7 +7,8 @@
     streamId, 
     muted = true,
     poster = '',
-    onStatusChange = () => {} 
+    onStatusChange = () => {},
+    onVideoMetrics = () => {}
   } = $props();
 
   let videoElement;
@@ -90,8 +91,18 @@
             videoElement.onplaying = () => {
               console.log(`[Video ${streamId}] Playing`);
               console.log(`[Video ${streamId}] Resolution: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+              onVideoMetrics({
+                width: videoElement.videoWidth,
+                height: videoElement.videoHeight
+              });
             };
-            videoElement.onresize = () => console.log(`[Video ${streamId}] Resize: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+            videoElement.onresize = () => {
+              console.log(`[Video ${streamId}] Resize: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+              onVideoMetrics({
+                width: videoElement.videoWidth,
+                height: videoElement.videoHeight
+              });
+            };
             videoElement.onwaiting = () => console.log(`[Video ${streamId}] Waiting for data...`);
             
             // Ensure playback starts

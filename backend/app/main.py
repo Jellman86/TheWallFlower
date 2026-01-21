@@ -218,7 +218,10 @@ async def update_stream(
             "whisper_enabled", "face_detection_enabled",
             "face_detection_interval",
             "audio_energy_threshold", "audio_vad_enabled",
-            "audio_vad_threshold", "audio_vad_onset", "audio_vad_offset"
+            "audio_vad_threshold", "audio_vad_onset", "audio_vad_offset",
+            "whisper_beam_size", "whisper_temperature",
+            "whisper_no_speech_threshold", "whisper_logprob_threshold",
+            "whisper_condition_on_previous_text"
         ]
     )
 
@@ -672,6 +675,7 @@ def get_stream_audio_config(stream_id: int, session: Session = Depends(get_sessi
 
     # Get effective config from worker
     effective = worker._get_audio_config()
+    whisper_effective = worker._get_whisper_config()
 
     # Get per-stream overrides from database
     stream = session.get(StreamConfig, stream_id)
@@ -687,6 +691,11 @@ def get_stream_audio_config(stream_id: int, session: Session = Depends(get_sessi
             "audio_vad_threshold": stream.audio_vad_threshold,
             "audio_vad_onset": stream.audio_vad_onset,
             "audio_vad_offset": stream.audio_vad_offset,
+            "whisper_beam_size": stream.whisper_beam_size,
+            "whisper_temperature": stream.whisper_temperature,
+            "whisper_no_speech_threshold": stream.whisper_no_speech_threshold,
+            "whisper_logprob_threshold": stream.whisper_logprob_threshold,
+            "whisper_condition_on_previous_text": stream.whisper_condition_on_previous_text,
         },
         "globals": {
             "energy_threshold": float(os.getenv("AUDIO_ENERGY_THRESHOLD", "0.015")),
@@ -694,7 +703,13 @@ def get_stream_audio_config(stream_id: int, session: Session = Depends(get_sessi
             "vad_threshold": float(os.getenv("SILERO_VAD_THRESHOLD", "0.6")),
             "vad_onset": 0.3,
             "vad_offset": 0.3,
-        }
+            "beam_size": 5,
+            "temperature": [0.0, 0.2, 0.4, 0.6, 0.8],
+            "no_speech_threshold": 0.6,
+            "logprob_threshold": -1.0,
+            "condition_on_previous_text": False,
+        },
+        "whisper_effective": whisper_effective,
     }
 
 

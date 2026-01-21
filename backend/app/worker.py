@@ -232,6 +232,31 @@ class StreamWorker:
             "vad_offset": self.config.audio_vad_offset if self.config.audio_vad_offset is not None else 0.3,
         }
 
+    def _get_whisper_config(self) -> dict:
+        """Get effective Whisper config (per-stream overrides or defaults)."""
+        temp_value = self.config.whisper_temperature
+        temperature = [0.0, 0.2, 0.4, 0.6, 0.8]
+        if temp_value is not None:
+            try:
+                temperature = json.loads(temp_value)
+            except Exception:
+                try:
+                    temperature = float(temp_value)
+                except Exception:
+                    temperature = [0.0, 0.2, 0.4, 0.6, 0.8]
+
+        return {
+            "beam_size": self.config.whisper_beam_size if self.config.whisper_beam_size is not None else 5,
+            "temperature": temperature,
+            "no_speech_threshold": self.config.whisper_no_speech_threshold if self.config.whisper_no_speech_threshold is not None else 0.6,
+            "logprob_threshold": self.config.whisper_logprob_threshold if self.config.whisper_logprob_threshold is not None else -1.0,
+            "condition_on_previous_text": (
+                self.config.whisper_condition_on_previous_text
+                if self.config.whisper_condition_on_previous_text is not None
+                else False
+            ),
+        }
+
     def enable_audio_preview(self, queue: asyncio.Queue) -> None:
         """Enable audio preview streaming (raw audio) to the provided queue."""
         loop = asyncio.get_running_loop()
@@ -503,6 +528,7 @@ class StreamWorker:
                 # - temperature=0.0: Deterministic, no random sampling
                 # - Stricter thresholds for silence/confidence detection
                 audio_cfg = self._get_audio_config()
+                whisper_cfg = self._get_whisper_config()
                 config_msg = {
                     "uid": f"wallflower_{self.config.id}_{int(time.time())}",
                     "language": "en",
@@ -515,12 +541,12 @@ class StreamWorker:
                     },
                     "initial_prompt": "Silence.",
                     "chunk_size": 1.0,
-                    "condition_on_previous_text": False,
+                    "condition_on_previous_text": whisper_cfg["condition_on_previous_text"],
                     # Parameters tuned for better accuracy on natural language
-                    "beam_size": 5,
-                    "temperature": [0.0, 0.2, 0.4, 0.6, 0.8],
-                    "logprob_threshold": -1.0,
-                    "no_speech_threshold": 0.6,
+                    "beam_size": whisper_cfg["beam_size"],
+                    "temperature": whisper_cfg["temperature"],
+                    "logprob_threshold": whisper_cfg["logprob_threshold"],
+                    "no_speech_threshold": whisper_cfg["no_speech_threshold"],
                     "compression_ratio_threshold": 1.35,
                 }
                 await ws.send(json.dumps(config_msg))

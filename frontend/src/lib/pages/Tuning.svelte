@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Icon from '../components/Icons.svelte';
+  import { streams } from '../services/api.js';
   
   // API base URL
   const API_BASE = '/api/tuning';
@@ -10,6 +11,9 @@
   let tuningRuns = $state([]);
   let isLoading = $state(false);
   let isTuning = $state(false);
+  let isApplying = $state(false);
+  let streamList = $state([]);
+  let selectedStreamId = $state('');
   
   // New sample form
   let fileInput;
@@ -17,6 +21,7 @@
 
   onMount(() => {
     loadSamples();
+    loadStreams();
   });
 
   async function loadSamples() {
@@ -32,12 +37,24 @@
     isLoading = false;
   }
 
+  async function loadStreams() {
+    try {
+      streamList = await streams.list();
+    } catch (e) {
+      console.error(e);
+      streamList = [];
+    }
+  }
+
   async function handleUpload() {
     if (!fileInput.files[0]) return;
     
     isUploading = true;
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
+    if (selectedStreamId) {
+      formData.append('stream_id', selectedStreamId);
+    }
     
     try {
       const res = await fetch(`${API_BASE}/samples`, {
@@ -60,6 +77,7 @@
 
   async function selectSample(sample) {
     selectedSample = sample;
+    selectedStreamId = sample.stream_id ? String(sample.stream_id) : '';
     await loadRuns(sample.id);
   }
 
@@ -80,9 +98,14 @@
         const res = await fetch(`${API_BASE}/samples/${selectedSample.id}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ground_truth: selectedSample.ground_truth})
+            body: JSON.stringify({
+              ground_truth: selectedSample.ground_truth,
+              stream_id: selectedStreamId ? Number(selectedStreamId) : null
+            })
         });
         if (res.ok) {
+            const updated = await res.json();
+            selectedSample = updated;
             alert('Saved');
         } else {
             alert('Save failed');
@@ -110,6 +133,27 @@
         alert('Tuning start failed');
     }
     isTuning = false;
+  }
+
+  async function handleApplyBest() {
+    if (!selectedSample) return;
+    if (!selectedStreamId) {
+      alert('Select a stream to apply tuning');
+      return;
+    }
+    isApplying = true;
+    try {
+      const res = await fetch(`${API_BASE}/samples/${selectedSample.id}/apply-best`, { method: 'POST' });
+      if (res.ok) {
+        alert('Applied best tuning to stream');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Apply failed');
+      }
+    } catch (e) {
+      alert('Apply failed');
+    }
+    isApplying = false;
   }
   
   async function handleDelete(e, id) {
@@ -147,6 +191,18 @@
             <Icon name={isUploading ? 'refresh' : 'plus'} size={16} class={isUploading ? 'animate-spin' : ''} />
             {isUploading ? 'Uploading...' : 'Upload .wav'}
         </button>
+      </div>
+      <div class="mt-3">
+        <label class="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Assign Stream</label>
+        <select
+          bind:value={selectedStreamId}
+          class="w-full px-3 py-2 text-sm bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded"
+        >
+          <option value="">Unassigned</option>
+          {#each streamList as stream (stream.id)}
+            <option value={String(stream.id)}>{stream.name}</option>
+          {/each}
+        </select>
       </div>
       <p class="text-xs text-[var(--color-text-muted)] mt-2">
         Required: 16kHz Mono WAV (Float32 or PCM16)
@@ -216,6 +272,17 @@
                         <Icon name="refresh" size={16} class="animate-spin" /> Tuning...
                     {:else}
                         <Icon name="sliders" size={16} /> Run Auto-Tuner
+                    {/if}
+                </button>
+                <button 
+                    onclick={handleApplyBest}
+                    disabled={isApplying || !selectedStreamId || tuningRuns.length === 0}
+                    class="px-4 py-2 bg-[var(--color-success)] text-white rounded text-sm hover:bg-[var(--color-success)]/80 flex items-center gap-2 disabled:opacity-50"
+                >
+                    {#if isApplying}
+                        <Icon name="refresh" size={16} class="animate-spin" /> Applying...
+                    {:else}
+                        <Icon name="check" size={16} /> Apply Best
                     {/if}
                 </button>
             </div>

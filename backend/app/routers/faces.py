@@ -1,7 +1,7 @@
 """Faces API router."""
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
 from sqlmodel import Session, select, col, func
 from datetime import datetime
 import os
@@ -11,6 +11,7 @@ import logging
 
 from app.db import get_session
 from app.models import Face, FaceRead, FaceEvent, FaceEmbedding
+from app.services.detection.face_service import face_service
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,13 @@ def list_known_names(
         )
         for face in name_to_face.values()
     ]
+
+
+@router.post("/pretrain/scan")
+def scan_pretrained_faces(background_tasks: BackgroundTasks):
+    """Trigger a rescan of /data/faces/known for pretraining."""
+    background_tasks.add_task(face_service.scan_known_faces)
+    return {"status": "started"}
 
 
 @router.get("/grouped", response_model=GroupedFacesResponse)

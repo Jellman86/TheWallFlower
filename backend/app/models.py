@@ -24,6 +24,13 @@ class StreamConfigBase(SQLModel):
     audio_vad_onset: Optional[float] = Field(default=None)  # VAD onset sensitivity
     audio_vad_offset: Optional[float] = Field(default=None)  # VAD offset sensitivity
 
+    # Whisper tuning settings (None = use defaults)
+    whisper_beam_size: Optional[int] = Field(default=None)
+    whisper_temperature: Optional[str] = Field(default=None)  # JSON list or float string
+    whisper_no_speech_threshold: Optional[float] = Field(default=None)
+    whisper_logprob_threshold: Optional[float] = Field(default=None)
+    whisper_condition_on_previous_text: Optional[bool] = Field(default=None)
+
 
     @field_validator('rtsp_url')
     @classmethod
@@ -86,6 +93,12 @@ class StreamConfigUpdate(SQLModel):
     audio_vad_threshold: Optional[float] = None
     audio_vad_onset: Optional[float] = None
     audio_vad_offset: Optional[float] = None
+
+    whisper_beam_size: Optional[int] = None
+    whisper_temperature: Optional[str] = None
+    whisper_no_speech_threshold: Optional[float] = None
+    whisper_logprob_threshold: Optional[float] = None
+    whisper_condition_on_previous_text: Optional[bool] = None
     
 
 class StreamConfigRead(StreamConfigBase):
@@ -156,6 +169,12 @@ class FaceEvent(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
     confidence: float
     snapshot_path: Optional[str] = None  # Full frame snapshot where face was seen
+    bbox_x1: Optional[int] = None
+    bbox_y1: Optional[int] = None
+    bbox_x2: Optional[int] = None
+    bbox_y2: Optional[int] = None
+    frame_width: Optional[int] = None
+    frame_height: Optional[int] = None
     
     # Denormalized name for easier querying without join
     face_name: str = "Unknown"
@@ -210,6 +229,7 @@ class TuningSample(SQLModel, table=True):
     __tablename__ = "tuning_samples"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    stream_id: Optional[int] = Field(default=None, foreign_key="stream_configs.id", index=True)
     filename: str  # e.g., "sample_123.wav"
     original_transcript: Optional[str] = None  # The initial guess
     ground_truth: Optional[str] = None  # The corrected text

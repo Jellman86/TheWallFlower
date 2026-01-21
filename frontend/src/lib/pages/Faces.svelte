@@ -14,6 +14,7 @@
   let total = $state(0);
   let hasMore = $state(false);
   let limit = 50;
+  let isPretraining = $state(false);
 
   // Merge mode state
   let mergeMode = $state(false);
@@ -72,6 +73,22 @@
       selectedForMerge = new Set();
       mergeError = '';
     }
+  }
+
+  async function handlePretrainScan() {
+    isPretraining = true;
+    try {
+      const res = await fetch('/api/faces/pretrain/scan', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Failed to start pretrain scan');
+      } else {
+        alert('Pretrain scan started');
+      }
+    } catch (e) {
+      alert('Failed to start pretrain scan');
+    }
+    isPretraining = false;
   }
 
   function toggleFaceSelection(faceId) {
@@ -233,6 +250,15 @@
             {mergeMode ? 'Cancel' : 'Merge'}
           </button>
         {/if}
+
+        <button
+          onclick={handlePretrainScan}
+          disabled={isPretraining}
+          class="px-3 py-1.5 text-sm rounded flex items-center gap-1 bg-[var(--color-bg-dark)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+        >
+          <Icon name="refresh" size={14} class={isPretraining ? 'animate-spin' : ''} />
+          {isPretraining ? 'Scanning...' : 'Rescan Pretrain'}
+        </button>
       </div>
     </div>
 
