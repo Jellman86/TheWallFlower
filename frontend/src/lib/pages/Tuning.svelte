@@ -17,6 +17,7 @@
   let recordDuration = $state(10);
   let isRecording = $state(false);
   let groundTruthDraft = $state('');
+  let recordCountdown = $state(0);
   
   // New sample form
   let fileInput;
@@ -82,7 +83,7 @@
     isUploading = false;
   }
 
-  async function handleRecord() {
+  async function startRecordRequest() {
     if (!selectedStreamId) {
       alert('Select a stream to record from');
       return;
@@ -110,6 +111,19 @@
       alert('Record failed: ' + e.message);
     }
     isRecording = false;
+  }
+
+  function handleRecord() {
+    if (isRecording || recordCountdown > 0) return;
+    recordCountdown = 3;
+    const timer = setInterval(async () => {
+      recordCountdown -= 1;
+      if (recordCountdown <= 0) {
+        clearInterval(timer);
+        recordCountdown = 0;
+        await startRecordRequest();
+      }
+    }, 1000);
   }
 
   async function selectSample(sample) {
@@ -242,11 +256,17 @@
         <span class="text-xs text-[var(--color-text-muted)]">seconds</span>
         <button
           onclick={handleRecord}
-          disabled={isRecording}
+          disabled={isRecording || recordCountdown > 0}
           class="flex-1 py-2 bg-[var(--color-bg-hover)] rounded text-sm hover:bg-[var(--color-bg-dark)] flex items-center justify-center gap-2"
         >
           <Icon name={isRecording ? 'refresh' : 'mic'} size={16} class={isRecording ? 'animate-spin' : ''} />
-          {isRecording ? 'Recording...' : 'Record Sample'}
+          {#if recordCountdown > 0}
+            Start in {recordCountdown}s...
+          {:else if isRecording}
+            Recording...
+          {:else}
+            Record Sample
+          {/if}
         </button>
       </div>
       <div class="mt-3">
