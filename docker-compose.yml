@@ -1,6 +1,6 @@
 services:
   thewallflower:
-    image: ghcr.io/jellman86/thewallflower:latest
+    image: ${THEWALLFLOWER_IMAGE:-ghcr.io/jellman86/thewallflower:dev}
     build:
       context: .
       dockerfile: Dockerfile
