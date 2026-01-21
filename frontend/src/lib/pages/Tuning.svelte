@@ -193,8 +193,9 @@
         </button>
       </div>
       <div class="mt-3">
-        <label class="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Assign Stream</label>
+        <label for="tuning-stream" class="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Assign Stream</label>
         <select
+          id="tuning-stream"
           bind:value={selectedStreamId}
           class="w-full px-3 py-2 text-sm bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded"
         >

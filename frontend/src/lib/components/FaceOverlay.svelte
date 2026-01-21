@@ -20,7 +20,7 @@
     return { displayWidth, displayHeight, offsetX, offsetY };
   }
 
-  $: metrics = getDisplayMetrics();
+  let metrics = $derived(getDisplayMetrics());
 
   function boxStyle(face) {
     if (!metrics || !face?.frame_width || !face?.frame_height) return '';

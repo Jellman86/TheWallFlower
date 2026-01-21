@@ -27,7 +27,7 @@
   let isLoading = $state(false);
   let showTranscripts = $state(true);
   let showFaceOverlay = $state(true);
-  let videoContainer;
+  let videoContainer = $state(null);
   let containerWidth = $state(0);
   let containerHeight = $state(0);
   let videoWidth = $state(0);
