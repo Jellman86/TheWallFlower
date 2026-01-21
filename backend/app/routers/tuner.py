@@ -14,7 +14,7 @@ from app.db import get_session
 from app.models import TuningSample, TuningRun, StreamConfig
 from app.services.tuner_service import tuner_service, TUNING_DATA_DIR
 
-router = APIRouter(prefix="/tuning", tags=["tuning"])
+router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 @router.post("/samples", response_model=TuningSample)
 async def create_sample(
