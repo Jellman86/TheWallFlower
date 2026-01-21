@@ -18,6 +18,8 @@
   let isRecording = $state(false);
   let groundTruthDraft = $state('');
   let recordCountdown = $state(0);
+  let recordStatus = $state('');
+  let recordError = $state('');
   
   // New sample form
   let fileInput;
@@ -89,6 +91,8 @@
       return;
     }
     isRecording = true;
+    recordStatus = `Recording ${Number(recordDuration) || 10}s sample...`;
+    recordError = '';
     try {
       const res = await fetch(`${API_BASE}/streams/${selectedStreamId}/record`, {
         method: 'POST',
@@ -103,14 +107,21 @@
         samples = [newSample, ...samples];
         groundTruthDraft = '';
         selectSample(newSample);
+        recordStatus = 'Sample recorded.';
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || 'Record failed');
+        recordError = err.detail || 'Record failed';
       }
     } catch (e) {
-      alert('Record failed: ' + e.message);
+      recordError = `Record failed: ${e.message}`;
     }
     isRecording = false;
+    if (recordError || recordStatus) {
+      setTimeout(() => {
+        recordStatus = '';
+        recordError = '';
+      }, 5000);
+    }
   }
 
   function handleRecord() {
@@ -269,6 +280,11 @@
           {/if}
         </button>
       </div>
+      {#if recordStatus || recordError}
+        <p class="mt-2 text-xs {recordError ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-muted)]'}">
+          {recordError || recordStatus}
+        </p>
+      {/if}
       <div class="mt-3">
         <label for="tuning-stream" class="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Assign Stream</label>
         <select
