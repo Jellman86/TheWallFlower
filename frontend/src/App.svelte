@@ -226,7 +226,9 @@
         </div>
       {/if}
 
-      {#if currentPage === 'faces'}
+      {#if currentPage === 'tuning'}
+        <Tuning />
+      {:else if currentPage === 'faces'}
         <Faces />
       {:else}
         {#if isLoading && streamList.length === 0}
