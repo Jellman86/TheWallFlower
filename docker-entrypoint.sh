@@ -90,6 +90,7 @@ log_info "  WHISPER_PORT: $WHISPER_PORT"
 log_info "  LOG_LEVEL: $LOG_LEVEL"
 log_info "  WORKERS: $WORKERS"
 log_info "  GIT_HASH: ${GIT_HASH:-unknown}"
+log_info "  cd/ci is working as expected"
 
 # Wait for WhisperLive if configured (REMOVED - Application handles reconnection)
 # if [ "${WAIT_FOR_WHISPER:-false}" = "true" ]; then
