@@ -487,7 +487,7 @@
 
   <!-- Sidebar -->
   <div class="lg:col-span-1 space-y-6">
-    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
+    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit flex flex-col max-h-[calc(100vh-180px)]">
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-semibold text-sm flex items-center gap-2">
           <Icon name="users" size={16} />
@@ -501,10 +501,10 @@
           Refresh
         </button>
       </div>
-      <p class="text-xs text-[var(--color-text-muted)] mb-3">
-        Drag an unknown face onto a person to train that identity.
-      </p>
-      <div class="space-y-2">
+        <p class="text-xs text-[var(--color-text-muted)] mb-3">
+          Drag an unknown face onto a person to train that identity.
+        </p>
+      <div class="space-y-2 overflow-y-auto pr-1">
         {#if knownPeople.length === 0}
           <div class="text-xs text-[var(--color-text-muted)]">
             No known people yet. Rename a face to create one.
@@ -538,9 +538,6 @@
           {/each}
         {/if}
       </div>
-    </div>
-    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
-      <FaceEventsPanel limit={15} />
     </div>
   </div>
 </div>
