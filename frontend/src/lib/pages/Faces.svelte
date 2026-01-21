@@ -512,7 +512,7 @@
           {#each knownPeople as person (person.face_id)}
             <div
               class="flex items-center gap-2 p-2 rounded border border-[var(--color-border)] bg-[var(--color-bg-dark)]/40 hover:bg-[var(--color-bg-hover)] transition-colors"
-              ondragover|preventDefault
+              ondragover={(event) => event.preventDefault()}
               ondrop={(event) => handleDropOnKnown(event, person.name)}
             >
               <div class="w-8 h-8 rounded-full overflow-hidden bg-[var(--color-bg-dark)] flex-shrink-0">
