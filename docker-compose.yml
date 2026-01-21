@@ -1,9 +1,7 @@
 services:
   thewallflower:
     image: ${THEWALLFLOWER_IMAGE:-ghcr.io/jellman86/thewallflower:dev}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    pull_policy: always
     container_name: thewallflower
     ports:
       - "${PORT:-8953}:8953"           # Main API
