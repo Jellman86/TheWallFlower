@@ -21,7 +21,6 @@ from app.config import settings
 from app.db import init_db, get_session, engine
 from app.models import (
     StreamConfig,
-    StreamConfigCreate,
     StreamConfigUpdate,
     StreamConfigRead,
     Transcript,
@@ -29,16 +28,12 @@ from app.models import (
 )
 from app.stream_manager import stream_manager
 from app.worker import StreamStatus, ConnectionState, CircuitBreakerState
-from app.stream_validator import StreamValidator, StreamMetadata, StreamErrorType
+from app.stream_validator import StreamValidator
 from app.services.transcript_service import transcript_service
 from app.services.event_broadcaster import event_broadcaster, StreamEvent
-from app.services.recording_indexer import recording_indexer
-from app.services.recording_service import recording_service
 from app.routers import debug as debug_router
 from app.routers import faces as faces_router
-from app.routers import recordings as recordings_router
 from app.routers import tuner as tuner_router
-import os
 
 # Configure logging
 logging.basicConfig(
@@ -100,12 +95,8 @@ async def lifespan(app: FastAPI):
     logger.info("Waiting for go2rtc to settle...")
     await asyncio.sleep(5)
 
-    # Start Recording Indexer
-    try:
-        recording_indexer.start()
-        logger.info("Recording indexer started")
-    except Exception as e:
-        logger.error(f"Failed to start recording indexer: {e}")
+    # Sync streams from Frigate before starting workers
+    await stream_manager.sync_with_frigate(force=True)
 
     # Start all configured streams (now async)
     await stream_manager.start_all()
@@ -118,15 +109,9 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(60) # Every minute
                 if not stream_manager.is_shutting_down:
                     logger.debug("Running background stream sync...")
+                    await stream_manager.sync_with_frigate()
                     await stream_manager.refresh_go2rtc_status()
                     await stream_manager.reload_all()
-                    
-                    # Run recording cleanup
-                    try:
-                        recording_service.delete_old_recordings()
-                    except Exception as e:
-                        logger.error(f"Recording cleanup error: {e}")
-                        
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -136,9 +121,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Stop recording indexer
-    recording_indexer.stop()
-
     # Stop all streams on shutdown (now async)
     await stream_manager.stop_all()
     logger.info("Stream manager stopped")
@@ -146,7 +128,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TheWallflower",
-    description="Self-hosted NVR with real-time Speech-to-Text",
+    description="Frigate companion with real-time Speech-to-Text",
     version=APP_VERSION,
     lifespan=lifespan,
 )
@@ -165,7 +147,6 @@ app.add_middleware(
 # Include routers
 app.include_router(debug_router.router)
 app.include_router(faces_router.router)
-app.include_router(recordings_router.router)
 app.include_router(tuner_router.router)
 
 
@@ -183,32 +164,22 @@ async def get_version():
     }
 
 
+@app.get("/api/frigate")
+def get_frigate_info() -> Dict[str, str]:
+    """Return Frigate connection info for the frontend."""
+    return {"url": settings.frigate_url}
+
+
 # =============================================================================
-# Stream Configuration CRUD Endpoints
+# Stream Configuration Endpoints
 # =============================================================================
-
-@app.post("/api/streams", response_model=StreamConfigRead, status_code=201)
-async def create_stream(
-    stream: StreamConfigCreate,
-    session: Session = Depends(get_session)
-) -> StreamConfig:
-    """Create a new stream configuration and start the worker."""
-    db_stream = StreamConfig.model_validate(stream)
-    session.add(db_stream)
-    session.commit()
-    session.refresh(db_stream)
-
-    # Auto-start the new stream (async)
-    await stream_manager.start_stream(db_stream.id)
-
-    return db_stream
-
 
 @app.get("/api/streams", response_model=List[StreamConfigRead])
-def list_streams(
+async def list_streams(
     session: Session = Depends(get_session)
 ) -> List[StreamConfig]:
     """List all stream configurations."""
+    await stream_manager.sync_with_frigate()
     statement = select(StreamConfig).order_by(StreamConfig.created_at.desc())
     streams = session.exec(statement).all()
     return streams
@@ -238,12 +209,14 @@ async def update_stream(
         raise HTTPException(status_code=404, detail="Stream not found")
 
     update_data = stream_update.model_dump(exclude_unset=True)
+    for key in ["name", "rtsp_url"]:
+        update_data.pop(key, None)
 
     # Check if we need to restart the worker
     needs_restart = any(
         key in update_data for key in [
-            "rtsp_url", "whisper_enabled",
-            "face_detection_enabled", "face_detection_interval",
+            "whisper_enabled", "face_detection_enabled",
+            "face_detection_interval",
             "audio_energy_threshold", "audio_vad_enabled",
             "audio_vad_threshold", "audio_vad_onset", "audio_vad_offset"
         ]
@@ -264,21 +237,12 @@ async def update_stream(
     return stream
 
 
-@app.delete("/api/streams/{stream_id}", status_code=204)
-async def delete_stream(
-    stream_id: int,
-    session: Session = Depends(get_session)
-) -> None:
-    """Delete a stream configuration and stop the worker."""
-    stream = session.get(StreamConfig, stream_id)
-    if not stream:
-        raise HTTPException(status_code=404, detail="Stream not found")
-
-    # Stop the worker first (async)
-    await stream_manager.stop_stream(stream_id)
-
-    session.delete(stream)
-    session.commit()
+@app.post("/api/streams/refresh")
+async def refresh_streams() -> Dict[str, str]:
+    """Force a resync of streams from Frigate."""
+    await stream_manager.sync_with_frigate(force=True)
+    await stream_manager.reload_all()
+    return {"status": "ok"}
 
 
 # =============================================================================
@@ -322,51 +286,6 @@ async def restart_stream(stream_id: int, session: Session = Depends(get_session)
         raise HTTPException(status_code=500, detail="Failed to restart stream")
 
     return {"status": "restarted", "stream_id": stream_id}
-
-
-@app.post("/api/streams/test-connection")
-async def test_rtsp_connection(rtsp_url: str, timeout: int = 10):
-    """Test if an RTSP URL is accessible with detailed diagnostics.
-
-    Uses FFprobe for validation with proper timeout support.
-    Returns detailed error categorization and stream metadata.
-    """
-    # Validate with FFprobe (has proper timeout)
-    metadata = await StreamValidator.validate(rtsp_url, timeout=timeout)
-
-    # Build debug info
-    debug_info = {
-        "command": metadata.debug_command,
-        "transport": metadata.debug_transport,
-        "stderr": metadata.debug_stderr,
-        "stdout": metadata.debug_stdout[:500] if metadata.debug_stdout else None,
-    }
-
-    if not metadata.is_valid:
-        return {
-            "success": False,
-            "error": metadata.error_message,
-            "error_type": metadata.error_type.value if metadata.error_type else "unknown",
-            "metadata": None,
-            "debug": debug_info
-        }
-
-    # Return success with full metadata
-    return {
-        "success": True,
-        "message": "Connection successful",
-        "error": None,
-        "error_type": None,
-        "metadata": {
-            "resolution": f"{metadata.width}x{metadata.height}",
-            "codec": metadata.codec,
-            "fps": round(metadata.fps, 1) if metadata.fps else None,
-            "bitrate_kbps": metadata.bitrate // 1000 if metadata.bitrate else None,
-            "has_audio": metadata.has_audio,
-            "audio_codec": metadata.audio_codec
-        },
-        "debug": debug_info
-    }
 
 
 @app.get("/api/streams/{stream_id}/diagnostics")

@@ -44,7 +44,7 @@ async function handleResponse(response) {
 }
 
 /**
- * Stream Configuration CRUD
+ * Stream Configuration
  */
 export const streams = {
   /**
@@ -64,18 +64,6 @@ export const streams = {
   },
 
   /**
-   * Create a new stream.
-   */
-  async create(data) {
-    const response = await fetchWithTimeout(`${BASE_URL}/streams`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return handleResponse(response);
-  },
-
-  /**
    * Update a stream.
    */
   async update(id, data) {
@@ -88,11 +76,11 @@ export const streams = {
   },
 
   /**
-   * Delete a stream.
+   * Refresh streams from Frigate.
    */
-  async delete(id) {
-    const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}`, {
-      method: 'DELETE'
+  async refresh() {
+    const response = await fetchWithTimeout(`${BASE_URL}/streams/refresh`, {
+      method: 'POST'
     });
     return handleResponse(response);
   }
@@ -109,17 +97,6 @@ export const control = {
     const response = await fetchWithTimeout(`${BASE_URL}/streams/${id}/start`, {
       method: 'POST'
     });
-    return handleResponse(response);
-  },
-
-  /**
-   * Test RTSP connection without creating a stream.
-   */
-  async testConnection(rtspUrl) {
-    // Use longer timeout for connection testing (60s)
-    const response = await fetchWithTimeout(`${BASE_URL}/streams/test-connection?rtsp_url=${encodeURIComponent(rtspUrl)}`, {
-      method: 'POST'
-    }, 60000);
     return handleResponse(response);
   },
 
@@ -179,6 +156,19 @@ export const status = {
    */
   async getAll() {
     const response = await fetchWithTimeout(`${BASE_URL}/status`);
+    return handleResponse(response);
+  }
+};
+
+/**
+ * Frigate
+ */
+export const frigate = {
+  /**
+   * Get Frigate connection info.
+   */
+  async getInfo() {
+    const response = await fetchWithTimeout(`${BASE_URL}/frigate`);
     return handleResponse(response);
   }
 };
@@ -339,51 +329,6 @@ export const faces = {
   thumbnailUrl(id) {
     // Add timestamp to bust cache if needed
     return `${API_BASE}/faces/thumbnails/${id}.jpg`;
-  }
-};
-
-/**
- * NVR / Recordings
- */
-export const recordings = {
-  /**
-   * List recordings for a stream within a time range.
-   * @param {number} streamId
-   * @param {Date} [start]
-   * @param {Date} [end]
-   */
-  async list(streamId, start, end) {
-    const params = new URLSearchParams();
-    if (start) params.append('start_time', start.toISOString());
-    if (end) params.append('end_time', end.toISOString());
-
-    const response = await fetchWithTimeout(`${BASE_URL}/streams/${streamId}/recordings?${params}`);
-    return handleResponse(response);
-  },
-
-  /**
-   * Get list of dates (YYYY-MM-DD) that have recordings.
-   */
-  async listDates(streamId) {
-    const response = await fetchWithTimeout(`${BASE_URL}/streams/${streamId}/recordings/dates`);
-    return handleResponse(response);
-  },
-
-  /**
-   * Delete a recording.
-   */
-  async delete(id) {
-    const response = await fetchWithTimeout(`${BASE_URL}/recordings/${id}`, {
-      method: 'DELETE'
-    });
-    return handleResponse(response);
-  },
-
-  /**
-   * Get stream URL for a recording (video/mp4).
-   */
-  streamUrl(id) {
-    return `${BASE_URL}/recordings/${id}/stream`;
   }
 };
 

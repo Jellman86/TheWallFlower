@@ -24,10 +24,6 @@ class StreamConfigBase(SQLModel):
     audio_vad_onset: Optional[float] = Field(default=None)  # VAD onset sensitivity
     audio_vad_offset: Optional[float] = Field(default=None)  # VAD offset sensitivity
 
-    # Recording / NVR settings
-    recording_enabled: bool = Field(default=False)
-    recording_retention_days: int = Field(default=7)  # How many days to keep recordings
-
 
     @field_validator('rtsp_url')
     @classmethod
@@ -91,9 +87,6 @@ class StreamConfigUpdate(SQLModel):
     audio_vad_onset: Optional[float] = None
     audio_vad_offset: Optional[float] = None
     
-    recording_enabled: Optional[bool] = None
-    recording_retention_days: Optional[int] = None
-
 
 class StreamConfigRead(StreamConfigBase):
     """Schema for reading a stream (includes id and timestamps)."""
@@ -206,64 +199,6 @@ class TranscriptCreate(SQLModel):
     is_final: bool = True
     confidence: Optional[float] = None
     speaker_id: Optional[int] = None
-
-
-# =============================================================================
-# NVR / Recording Models
-# =============================================================================
-
-class Recording(SQLModel, table=True):
-    """Video recording segment stored in database."""
-    __tablename__ = "recordings"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    stream_id: int = Field(foreign_key="stream_configs.id", index=True)
-    
-    start_time: datetime = Field(index=True)
-    end_time: datetime = Field(index=True)
-    duration_seconds: float
-    
-    file_path: str = Field(unique=True)  # Relative path: {stream_id}/{date}/{hour}/{file}.mp4
-    file_size_bytes: int = Field(default=0)
-    
-    retention_locked: bool = Field(default=False)  # If True, auto-cleanup will skip this
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-# =============================================================================
-# Tuning Models
-# =============================================================================
-
-class TuningSample(SQLModel, table=True):
-    """Audio sample for transcription tuning."""
-    __tablename__ = "tuning_samples"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    filename: str  # e.g., "sample_123.wav"
-    original_transcript: Optional[str] = None  # The initial guess
-    ground_truth: Optional[str] = None  # The corrected text
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    duration_seconds: float = 0.0
-
-
-class TuningRun(SQLModel, table=True):
-    """Results of a tuning run."""
-    __tablename__ = "tuning_runs"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    sample_id: int = Field(foreign_key="tuning_samples.id", index=True)
-    
-    # Parameters used
-    beam_size: int
-    temperature: str  # JSON string of the temp array or single float
-    vad_threshold: float
-    
-    # Result
-    transcription: str
-    wer: float  # Word Error Rate (lower is better)
-    execution_time: float
-    
-    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # =============================================================================

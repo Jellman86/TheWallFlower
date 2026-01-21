@@ -1,22 +1,22 @@
 # TheWallflower
 
-A self-hosted, privacy-focused NVR (Network Video Recorder) with real-time Speech-to-Text and high-accuracy Face Recognition.
+A self-hosted, privacy-focused AI companion for Frigate NVR with real-time Speech-to-Text and high-accuracy Face Recognition.
 
 > ⚠️ **Warning:** This project is under active, experimental development. Features change often, and the main branch is frequently broken. We prioritize moving fast and testing new AI integrations over stability at this stage. Use at your own risk.
 
 ## Current Status: v0.3.0
 
-TheWallflower has evolved into a "Split-Pipeline" architecture, offloading heavy video tasks to `go2rtc` while the Python backend focuses on AI processing (Whisper + InsightFace).
+TheWallflower now pairs with Frigate for DVR features, while the Python backend focuses on AI processing (Whisper + InsightFace).
 
 ## Features
 
 - **Low-Latency WebRTC** - Primary viewing via WebRTC for <100ms latency.
-- **24/7 Continuous Recording** - Zero-transcode (direct copy) segmented MP4 recording for maximum efficiency.
+- **Frigate DVR Integration** - Camera definitions and recordings handled by Frigate.
 - **Advanced Face Recognition** - Robust identity management using multi-embedding averages and local pretraining (`/data/faces/known/{name}/`).
 - **Real-time Speech-to-Text** - Transcription of RTSP audio streams powered by WhisperLive with aggressive anti-hallucination filtering.
 - **Audio Pre-filtering** - RMS Energy gating and Silero VAD (Voice Activity Detection) ensure Whisper only processes actual speech.
 - **Event Snapshots** - High-definition full-frame captures for every face detection event.
-- **UI-First Configuration** - No YAML files needed. Add and manage cameras through the modern Svelte 5 web interface.
+- **Frigate-Synced Cameras** - Camera list is sourced from Frigate config.
 
 ## Tech Stack
 
@@ -47,6 +47,7 @@ cd TheWallflower
 # Copy and customize environment (essential for WebRTC)
 cp .env.example .env
 # Edit .env and set WEBRTC_ADVERTISED_IP to your server's local IP
+# Set FRIGATE_URL to your Frigate base URL (e.g., http://frigate:5000)
 
 # Start the services
 docker compose up -d
@@ -85,8 +86,8 @@ TheWallflower supports hardware acceleration for AI tasks:
         │ Face Worker Pipeline:                                        │
         │  Fetch Frame ──► InsightFace ──► Identify ──► DB Event       │
         │                                                              │
-        │ Recording Worker:                                            │
-        │  FFmpeg (Copy) ──► Segmented MP4s ──► /data/recordings       │
+        │ Frigate (External DVR):                                      │
+        │  Recordings + timeline + detections                          │
         │                                                              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -108,13 +109,13 @@ TheWallflower/
 │   │   ├── main.py           # FastAPI application & SSE
 │   │   ├── stream_manager.py # Worker lifecycle
 │   │   ├── worker.py         # Audio extraction & VAD
-│   │   ├── workers/          # Background tasks (Face, Recording)
-│   │   └── services/         # Business logic (Detection, Recording)
+│   │   ├── workers/          # Background tasks (Face)
+│   │   └── services/         # Business logic (Detection)
 │   └── migrations/           # Alembic DB migrations
 ├── frontend/
 │   ├── src/
 │   │   ├── lib/
-│   │   │   ├── components/   # WebRTCPlayer, FaceCard, RecordingsPanel
+│   │   │   ├── components/   # WebRTCPlayer, FaceCard
 │   │   │   └── services/     # API client (api.js)
 │   └── public/
 ├── docker-compose.yml

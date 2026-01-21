@@ -27,6 +27,9 @@ class Settings:
     go2rtc_webrtc_port: int = 8956
     go2rtc_external_host: str = ""  # External host for browser access
 
+    # Frigate integration
+    frigate_url: str = "http://frigate:5000"
+
     # Application
     log_level: str = "INFO"
     debug: bool = False
@@ -99,6 +102,7 @@ def get_settings() -> Settings:
         go2rtc_external_host=os.getenv(
             "GO2RTC_EXTERNAL_HOST", Settings.go2rtc_external_host
         ),
+        frigate_url=os.getenv("FRIGATE_URL", Settings.frigate_url),
 
         # Application
         log_level=os.getenv("LOG_LEVEL", Settings.log_level),

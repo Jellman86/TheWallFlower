@@ -6,7 +6,6 @@
 
   import AudioVisualizer from './AudioVisualizer.svelte';
   import TranscriptPanel from './TranscriptPanel.svelte';
-  import RecordingsPanel from './RecordingsPanel.svelte';
   import FaceEventsPanel from './FaceEventsPanel.svelte';
 
   let {
@@ -17,7 +16,7 @@
   } = $props();
 
   // Local state for view logic
-  let activeView = $state('live'); // 'live', 'recordings', 'faces'
+  let activeView = $state('live'); // 'live', 'faces'
 
   // Use global store for status and transcripts
   let streamStatus = $derived(stream && stream.id ? streamEvents.getStreamStatus(stream.id) : null);
@@ -169,16 +168,6 @@
           <span class="hidden md:inline">Live</span>
         </button>
         
-        {#if stream.recording_enabled}
-          <button
-            onclick={() => activeView = 'recordings'}
-            class="p-3 text-sm font-medium flex items-center gap-2 transition-colors { activeView === 'recordings' ? 'bg-[var(--color-bg-card)] text-[var(--color-primary)] border-b-2 md:border-b-0 md:border-l-2 border-[var(--color-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]' }"
-          >
-            <Icon name="calendar" size={18} />
-            <span class="hidden md:inline">Recordings</span>
-          </button>
-        {/if}
-
         {#if stream.face_detection_enabled}
           <button
             onclick={() => activeView = 'faces'}
@@ -191,11 +180,7 @@
       </div>
 
       <div class="flex-1 overflow-hidden relative bg-black">
-        {#if activeView === 'recordings' && stream.recording_enabled}
-          <div class="absolute inset-0 p-4 bg-[var(--color-bg-card)]">
-            <RecordingsPanel streamId={stream.id} />
-          </div>
-        {:else if activeView === 'faces' && stream.face_detection_enabled}
+        {#if activeView === 'faces' && stream.face_detection_enabled}
           <div class="absolute inset-0 p-4 bg-[var(--color-bg-card)] overflow-y-auto">
             <FaceEventsPanel streamId={stream.id} />
           </div>

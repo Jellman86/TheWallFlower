@@ -1,6 +1,6 @@
 <script>
   import { untrack } from 'svelte';
-  import { streams, healthCheck, fetchVersion } from './lib/services/api.js';
+  import { streams, healthCheck, fetchVersion, frigate } from './lib/services/api.js';
   import { streamEvents } from './lib/stores/streamEvents.svelte.js';
   import StreamCard from './lib/components/StreamCard.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
@@ -14,6 +14,7 @@
   let isLoading = $state(true);
   let error = $state('');
   let isHealthy = $state(false);
+  let frigateUrl = $state('');
 
   // Version state
   let version = $state("0.3.0");
@@ -37,6 +38,7 @@
         loadStreams();
         checkHealth();
         loadVersion();
+        loadFrigateInfo();
         streamEvents.connect();
       });
 
@@ -62,6 +64,15 @@
     }
   }
 
+  async function loadFrigateInfo() {
+    try {
+      const info = await frigate.getInfo();
+      frigateUrl = info?.url || '';
+    } catch (e) {
+      frigateUrl = '';
+    }
+  }
+
   async function loadStreams() {
     isLoading = true;
     error = '';
@@ -73,9 +84,16 @@
     isLoading = false;
   }
 
-  function handleAddStream() {
-    editingStream = null;
-    showModal = true;
+  async function handleRefresh() {
+    isLoading = true;
+    error = '';
+    try {
+      await streams.refresh();
+      streamList = await streams.list();
+    } catch (e) {
+      error = e.message || 'Failed to refresh streams';
+    }
+    isLoading = false;
   }
 
   function handleEditStream(stream) {
@@ -175,22 +193,25 @@
 
         <!-- Refresh button -->
         <button
-          onclick={loadStreams}
+          onclick={handleRefresh}
           class="p-2 hover:bg-[var(--color-bg-hover)] rounded transition-colors"
           title="Refresh streams"
         >
           <Icon name="refresh" size={18} class={isLoading ? 'animate-spin' : ''} />
         </button>
 
-        <!-- Add stream button -->
-        <button
-          onclick={handleAddStream}
-          class="flex items-center gap-2 px-3 py-2 md:px-4 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors"
-          title="Add Stream"
-        >
-          <Icon name="plus" size={18} />
-          <span class="hidden md:inline">Add Stream</span>
-        </button>
+        {#if frigateUrl}
+          <a
+            href={frigateUrl}
+            target="_blank"
+            rel="noopener"
+            class="flex items-center gap-2 px-3 py-2 md:px-4 bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] rounded transition-colors text-sm"
+            title="Open Frigate DVR"
+          >
+            <Icon name="video" size={18} />
+            <span class="hidden md:inline">Frigate DVR</span>
+          </a>
+        {/if}
       </div>
     </div>
   </header>
@@ -220,17 +241,21 @@
           <div class="flex items-center justify-center h-64">
             <div class="text-center">
               <Icon name="flower" size={48} class="mx-auto mb-4 text-[var(--color-text-muted)]" />
-              <h2 class="text-xl font-semibold mb-2">No Streams Configured</h2>
+              <h2 class="text-xl font-semibold mb-2">No Cameras Found</h2>
               <p class="text-[var(--color-text-muted)] mb-4">
-                Add your first RTSP camera stream to get started.
+                Make sure Frigate is running and has cameras configured.
               </p>
-              <button
-                onclick={handleAddStream}
-                class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors mx-auto"
-              >
-                <Icon name="plus" size={18} />
-                Add Your First Stream
-              </button>
+              {#if frigateUrl}
+                <a
+                  href={frigateUrl}
+                  target="_blank"
+                  rel="noopener"
+                  class="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] rounded transition-colors mx-auto"
+                >
+                  <Icon name="video" size={18} />
+                  Open Frigate
+                </a>
+              {/if}
             </div>
           </div>
         {:else if viewMode === 'focus' && focusedStream}

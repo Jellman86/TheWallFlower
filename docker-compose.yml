@@ -22,6 +22,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WORKERS=${WORKERS:-1}
       - WAIT_FOR_WHISPER=true
+      # Frigate integration
+      - FRIGATE_URL=${FRIGATE_URL:-http://frigate:5000}
       # go2rtc configuration
       - GO2RTC_HOST=${GO2RTC_HOST:-localhost}
       - GO2RTC_PORT=8954

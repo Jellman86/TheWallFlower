@@ -1,5 +1,5 @@
 <script>
-  import { streams, control } from '../services/api.js';
+  import { streams } from '../services/api.js';
   import Icon from './Icons.svelte';
   import Tooltip from './Tooltip.svelte';
   import AudioPreview from './AudioPreview.svelte';
@@ -7,14 +7,11 @@
 
   // Tooltip texts for settings
   const TOOLTIPS = {
-    streamName: 'A friendly name to identify this camera in the UI.',
-    rtspUrl: 'The RTSP stream URL from your camera. Check your camera documentation for the correct path.',
+    streamName: 'Camera names are managed by Frigate and shown here for reference.',
     speechToText: 'Enables real-time speech transcription using WhisperLive AI. Audio is processed locally - nothing is sent to the cloud.',
     saveTranscripts: 'Save transcripts to a text file for archival or external processing.',
     faceDetection: 'Detect and identify faces using InsightFace AI. Runs locally on CPU. Unknown faces are saved for later identification.',
     faceInterval: 'How often to capture a frame for face detection. Lower = more responsive but higher CPU usage.',
-    recording: 'Continuously record video to disk in 15-minute segments. Uses FFmpeg with zero-transcoding for minimal CPU usage.',
-    retention: 'How long to keep recordings before automatic deletion. Older files are removed hourly.',
     energyGate: 'Filters out low-volume audio (background noise, silence). Higher values = more aggressive filtering. If speech is being missed, try lowering this.',
     sileroVad: 'Uses a neural network to detect human speech vs. other sounds. More accurate than energy gating alone but uses more CPU.',
     vadThreshold: 'How confident the AI must be that audio contains speech. Higher = fewer false positives but may miss quiet speech.',
@@ -34,18 +31,13 @@
   let activeTab = $state('general');
 
   let name = $state('');
-  let rtspUrl = $state('');
   let whisperEnabled = $state(false);
   let faceDetectionEnabled = $state(false);
   let faceDetectionInterval = $state(1);
   let saveTranscriptsToFile = $state(false);
   let transcriptFilePath = $state('');
-  let recordingEnabled = $state(false);
-  let recordingRetentionDays = $state(7);
   let isLoading = $state(false);
-  let isTesting = $state(false);
   let error = $state('');
-  let testResult = $state(null);
 
   // Audio tuning settings (null = use global defaults)
   let audioEnergyThreshold = $state(null);
@@ -64,7 +56,7 @@
   };
 
   let isEditing = $derived(stream !== null);
-  let title = $derived(isEditing ? 'Stream Settings' : 'Add New Stream');
+  let title = $derived(isEditing ? 'Camera Settings' : 'Camera Settings');
 
   // Check if audio has custom settings
   let hasCustomAudio = $derived(
@@ -76,14 +68,11 @@
   $effect(() => {
     if (stream) {
       name = stream.name || '';
-      rtspUrl = stream.rtsp_url || '';
       whisperEnabled = stream.whisper_enabled || false;
       faceDetectionEnabled = stream.face_detection_enabled || false;
       faceDetectionInterval = stream.face_detection_interval || 1;
       saveTranscriptsToFile = stream.save_transcripts_to_file || false;
       transcriptFilePath = stream.transcript_file_path || '';
-      recordingEnabled = stream.recording_enabled || false;
-      recordingRetentionDays = stream.recording_retention_days || 7;
       // Audio tuning settings
       audioEnergyThreshold = stream.audio_energy_threshold;
       audioVadEnabled = stream.audio_vad_enabled;
@@ -92,14 +81,11 @@
       audioVadOffset = stream.audio_vad_offset;
     } else {
       name = '';
-      rtspUrl = '';
       whisperEnabled = false;
       faceDetectionEnabled = false;
       faceDetectionInterval = 1;
       saveTranscriptsToFile = false;
       transcriptFilePath = '';
-      recordingEnabled = false;
-      recordingRetentionDays = 7;
       // Reset audio tuning
       audioEnergyThreshold = null;
       audioVadEnabled = null;
@@ -108,69 +94,22 @@
       audioVadOffset = null;
     }
     error = '';
-    testResult = null;
     activeTab = 'general';
   });
-
-  async function handleTestConnection() {
-    if (!rtspUrl.trim()) {
-      error = 'Enter an RTSP URL to test';
-      return;
-    }
-
-    isTesting = true;
-    error = '';
-    testResult = null;
-
-    try {
-      const result = await control.testConnection(rtspUrl.trim());
-      testResult = result;
-      if (!result.success) {
-        error = result.error || 'Connection failed';
-      }
-    } catch (e) {
-      error = e.message || 'Failed to test connection';
-      testResult = { success: false, error: error };
-    }
-
-    isTesting = false;
-  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     error = '';
 
-    if (!name.trim()) {
-      error = 'Name is required';
-      activeTab = 'general';
-      return;
-    }
-    if (!rtspUrl.trim()) {
-      error = 'RTSP URL is required';
-      activeTab = 'general';
-      return;
-    }
-
-    // Basic RTSP URL validation
-    if (!rtspUrl.trim().toLowerCase().startsWith('rtsp://')) {
-      error = 'RTSP URL must start with rtsp://';
-      activeTab = 'general';
-      return;
-    }
-
     isLoading = true;
 
     try {
       const data = {
-        name: name.trim(),
-        rtsp_url: rtspUrl.trim(),
         whisper_enabled: whisperEnabled,
         face_detection_enabled: faceDetectionEnabled,
         face_detection_interval: parseInt(faceDetectionInterval) || 1,
         save_transcripts_to_file: saveTranscriptsToFile,
         transcript_file_path: transcriptFilePath.trim() || null,
-        recording_enabled: recordingEnabled,
-        recording_retention_days: parseInt(recordingRetentionDays) || 7,
         // Audio tuning settings (null = use global defaults)
         audio_energy_threshold: audioEnergyThreshold,
         audio_vad_enabled: audioVadEnabled,
@@ -181,8 +120,6 @@
 
       if (isEditing) {
         await streams.update(stream.id, data);
-      } else {
-        await streams.create(data);
       }
 
       onSaved();
@@ -191,22 +128,6 @@
       error = e.message || 'Failed to save stream';
     }
 
-    isLoading = false;
-  }
-
-  async function handleDelete() {
-    if (!confirm(`Are you sure you want to delete "${stream.name}"?`)) {
-      return;
-    }
-
-    isLoading = true;
-    try {
-      await streams.delete(stream.id);
-      onSaved();
-      onClose();
-    } catch (e) {
-      error = e.message || 'Failed to delete stream';
-    }
     isLoading = false;
   }
 
@@ -301,7 +222,7 @@
             <div class="space-y-5">
               <div>
                 <label for="name" class="flex items-center gap-2 text-sm font-medium mb-2">
-                  Stream Name
+                  Camera Name
                   <Tooltip text={TOOLTIPS.streamName}>
                     <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
                   </Tooltip>
@@ -310,80 +231,12 @@
                   type="text"
                   id="name"
                   bind:value={name}
-                  placeholder="Front Door Camera"
-                  class="w-full px-4 py-2.5 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] focus:outline-none transition-colors"
+                  readonly
+                  class="w-full px-4 py-2.5 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg text-[var(--color-text-muted)]"
                 />
-              </div>
-
-              <div>
-                <label for="rtsp" class="flex items-center gap-2 text-sm font-medium mb-2">
-                  RTSP URL
-                  <Tooltip text={TOOLTIPS.rtspUrl}>
-                    <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
-                  </Tooltip>
-                </label>
-                <div class="flex gap-2">
-                  <input
-                    type="text"
-                    id="rtsp"
-                    bind:value={rtspUrl}
-                    placeholder="rtsp://user:pass@192.168.1.100:554/stream"
-                    class="flex-1 px-4 py-2.5 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] focus:outline-none font-mono text-sm transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onclick={handleTestConnection}
-                    disabled={isTesting || !rtspUrl.trim()}
-                    class="px-4 py-2.5 text-sm font-medium bg-[var(--color-bg-hover)] hover:bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Test connection"
-                  >
-                    {#if isTesting}
-                      <Icon name="refresh" size={16} class="animate-spin" />
-                    {:else}
-                      Test
-                    {/if}
-                  </button>
-                </div>
                 <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                  Include credentials if required: rtsp://user:pass@host:port/path
+                  Cameras are managed by Frigate. Update names and sources in the Frigate config.
                 </p>
-
-                {#if testResult}
-                  <div class="mt-3 p-4 rounded-lg text-sm {testResult.success ? 'bg-[var(--color-success)]/10 border border-[var(--color-success)]/30' : 'bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/30'}">
-                    {#if testResult.success}
-                      <div class="flex items-center gap-2 text-[var(--color-success)] font-medium mb-2">
-                        <Icon name="check" size={16} />
-                        Connection Successful
-                      </div>
-                      {#if testResult.metadata}
-                        <div class="grid grid-cols-2 gap-2 text-xs text-[var(--color-text-muted)]">
-                          <div>Resolution: <span class="text-[var(--color-text)]">{testResult.metadata.resolution}</span></div>
-                          <div>Codec: <span class="text-[var(--color-text)]">{testResult.metadata.codec}</span></div>
-                          {#if testResult.metadata.fps}
-                            <div>FPS: <span class="text-[var(--color-text)]">{testResult.metadata.fps}</span></div>
-                          {/if}
-                          {#if testResult.metadata.has_audio}
-                            <div>Audio: <span class="text-[var(--color-text)]">{testResult.metadata.audio_codec}</span></div>
-                          {/if}
-                        </div>
-                      {/if}
-                    {:else}
-                      <div class="flex items-center gap-2 text-[var(--color-danger)] font-medium mb-2">
-                        <Icon name="x" size={16} />
-                        {#if testResult.error_type === 'auth_failed'}
-                          Authentication Failed
-                        {:else if testResult.error_type === 'unreachable'}
-                          Host Unreachable
-                        {:else if testResult.error_type === 'timeout'}
-                          Connection Timeout
-                        {:else}
-                          Connection Failed
-                        {/if}
-                      </div>
-                      <p class="text-xs text-[var(--color-text-muted)]">{testResult.error}</p>
-                    {/if}
-                  </div>
-                {/if}
               </div>
             </div>
           {/if}
@@ -487,54 +340,6 @@
                 {/if}
               </div>
 
-              <!-- Recording Card -->
-              <div class="p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-dark)]/30">
-                <label class="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    bind:checked={recordingEnabled}
-                    class="w-5 h-5 mt-0.5 accent-[var(--color-primary)] rounded"
-                  />
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <Icon name="video" size={18} class="text-[var(--color-primary)]" />
-                      <span class="font-medium">24/7 Recording</span>
-                      <Tooltip text={TOOLTIPS.recording}>
-                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
-                      </Tooltip>
-                    </div>
-                    <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                      Continuous recording in 15-minute segments
-                    </p>
-                  </div>
-                </label>
-
-                {#if recordingEnabled}
-                  <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
-                    <label for="retention-days" class="flex items-center gap-2 text-sm mb-2">
-                      Retention Period
-                      <Tooltip text={TOOLTIPS.retention}>
-                        <Icon name="help-circle" size={14} class="text-[var(--color-text-muted)] cursor-help" />
-                      </Tooltip>
-                    </label>
-                    <div class="flex items-center gap-3">
-                      <input
-                        type="range"
-                        id="retention-days"
-                        min="1"
-                        max="30"
-                        step="1"
-                        bind:value={recordingRetentionDays}
-                        class="flex-1 h-2 bg-[var(--color-bg-hover)] rounded-lg appearance-none cursor-pointer accent-[var(--color-primary)]"
-                      />
-                      <span class="text-sm font-mono w-16 text-right">{recordingRetentionDays} days</span>
-                    </div>
-                    <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                      Recordings older than this will be automatically deleted
-                    </p>
-                  </div>
-                {/if}
-              </div>
             </div>
           {/if}
 
@@ -722,20 +527,7 @@
 
         <!-- Footer (sticky) -->
         <div class="flex-shrink-0 flex items-center justify-between px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-bg-card)]">
-          {#if isEditing}
-            <button
-              type="button"
-              onclick={handleDelete}
-              disabled={isLoading}
-              class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-lg transition-colors disabled:opacity-50"
-            >
-              <Icon name="trash" size={16} />
-              Delete
-            </button>
-          {:else}
-            <div></div>
-          {/if}
-
+          <div></div>
           <div class="flex gap-3">
             <button
               type="button"

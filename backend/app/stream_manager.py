@@ -16,7 +16,7 @@ import signal
 import threading
 import time
 from typing import Dict, List, Optional, Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlmodel import Session, select
 
@@ -29,7 +29,7 @@ from app.worker import (
     ConnectionState, CircuitBreakerState
 )
 from app.workers.face_worker import FaceDetectionWorker
-from app.workers.recording_worker import RecordingWorker
+from app.frigate_client import frigate_client
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,10 @@ class StreamManager:
 
         self._workers: Dict[int, StreamWorker] = {}
         self._face_workers: Dict[int, FaceDetectionWorker] = {}
-        self._recording_workers: Dict[int, RecordingWorker] = {}
         self._workers_lock = threading.Lock()
         self._shutting_down = False
+        self._frigate_sync_lock = asyncio.Lock()
+        self._frigate_last_sync = datetime.min
 
         self._whisper_host = settings.whisper_host
         self._whisper_port = settings.whisper_port
@@ -117,7 +118,6 @@ class StreamManager:
     def _cleanup_loop(self) -> None:
         """Periodically purge old records from database."""
         from app.services.transcript_service import transcript_service
-        from app.services.recording_service import recording_service
 
         # Initial wait to let system settle
         time.sleep(60)
@@ -129,13 +129,7 @@ class StreamManager:
             except Exception as e:
                 logger.error(f"Transcript cleanup error: {e}")
 
-            try:
-                # Cleanup recordings older than retention policy
-                recording_service.delete_old_recordings()
-            except Exception as e:
-                logger.error(f"Recording cleanup error: {e}")
-
-            # Sleep for 1 hour (recordings need more frequent cleanup than transcripts)
+            # Sleep for 1 hour between cleanup cycles
             for _ in range(60 * 6):  # 1 hour in 10s increments
                 if self._shutting_down:
                     break
@@ -228,16 +222,11 @@ class StreamManager:
             if config.face_detection_enabled:
                 face_worker = FaceDetectionWorker(config)
 
-            # Initialize Recording Worker if enabled
-            recording_worker = None
-            if config.recording_enabled:
-                recording_worker = RecordingWorker(config)
 
         with self._workers_lock:
             if stream_id in self._workers:
                 worker = None
                 face_worker = None
-                recording_worker = None
                 return True
 
             try:
@@ -250,11 +239,6 @@ class StreamManager:
                     face_worker.start()
                     self._face_workers[stream_id] = face_worker
                 
-                # Start Recording Worker
-                if recording_worker:
-                    recording_worker.start()
-                    self._recording_workers[stream_id] = recording_worker
-                    
                 logger.info(f"Started stream {stream_id}: {stream_name}")
                 return True
             except Exception as e:
@@ -266,13 +250,9 @@ class StreamManager:
         with self._workers_lock:
             worker = self._workers.pop(stream_id, None)
             face_worker = self._face_workers.pop(stream_id, None)
-            recording_worker = self._recording_workers.pop(stream_id, None)
             
         if face_worker:
             face_worker.stop()
-            
-        if recording_worker:
-            recording_worker.stop()
             
         if worker:
             worker.stop()
@@ -327,6 +307,46 @@ class StreamManager:
             "rtsp": self._go2rtc.get_rtsp_url(stream_name),
             "go2rtc_name": stream_name
         }
+
+    async def sync_with_frigate(self, force: bool = False) -> None:
+        """Sync camera definitions from Frigate into StreamConfig rows."""
+        if not force:
+            elapsed = (datetime.utcnow() - self._frigate_last_sync).total_seconds()
+            if elapsed < 30:
+                return
+
+        async with self._frigate_sync_lock:
+            try:
+                cameras = await frigate_client.get_cameras()
+            except Exception as e:
+                logger.error(f"Failed to sync cameras from Frigate: {e}")
+                return
+
+            if not cameras:
+                logger.warning("Frigate returned no cameras; skipping sync")
+                return
+
+            active_names = {cam.name for cam in cameras}
+            with Session(engine) as session:
+                existing = session.exec(select(StreamConfig)).all()
+                existing_by_name = {stream.name: stream for stream in existing}
+
+                for cam in cameras:
+                    stream = existing_by_name.get(cam.name)
+                    if stream:
+                        if stream.rtsp_url != cam.rtsp_url:
+                            stream.rtsp_url = cam.rtsp_url
+                            stream.updated_at = datetime.utcnow()
+                    else:
+                        session.add(StreamConfig(name=cam.name, rtsp_url=cam.rtsp_url))
+
+                for name, stream in existing_by_name.items():
+                    if name not in active_names:
+                        session.delete(stream)
+
+                session.commit()
+
+            self._frigate_last_sync = datetime.utcnow()
 
     async def reload_all(self) -> None:
         logger.info("Reloading all streams from database")
@@ -506,8 +526,6 @@ class StreamManager:
             # Stop all worker types
             for worker in self._face_workers.values():
                 worker.stop()
-            for worker in self._recording_workers.values():
-                worker.stop()
             for worker in self._workers.values():
                 worker.stop()
 
@@ -517,8 +535,6 @@ class StreamManager:
             with self._workers_lock:
                 # Stop all worker types
                 for worker in self._face_workers.values():
-                    worker.stop()
-                for worker in self._recording_workers.values():
                     worker.stop()
                 for worker in self._workers.values():
                     worker.stop()
