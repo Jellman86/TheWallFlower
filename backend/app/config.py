@@ -29,6 +29,7 @@ class Settings:
 
     # Frigate integration
     frigate_url: str = "http://frigate:5000"
+    frigate_rtsp_host: str = "frigate"
 
     # Application
     log_level: str = "INFO"
@@ -103,6 +104,7 @@ def get_settings() -> Settings:
             "GO2RTC_EXTERNAL_HOST", Settings.go2rtc_external_host
         ),
         frigate_url=os.getenv("FRIGATE_URL", Settings.frigate_url),
+        frigate_rtsp_host=os.getenv("FRIGATE_RTSP_HOST", Settings.frigate_rtsp_host),
 
         # Application
         log_level=os.getenv("LOG_LEVEL", Settings.log_level),

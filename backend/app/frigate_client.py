@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -37,7 +38,9 @@ class FrigateClient:
         for name, cam_config in cameras.items():
             rtsp_url = self._extract_rtsp(cam_config or {})
             if rtsp_url:
-                results.append(FrigateCamera(name=name, rtsp_url=rtsp_url))
+                results.append(
+                    FrigateCamera(name=name, rtsp_url=self._normalize_rtsp_url(rtsp_url))
+                )
         return results
 
     def _extract_rtsp(self, cam_config: Dict[str, Any]) -> Optional[str]:
@@ -54,6 +57,39 @@ class FrigateClient:
 
         first = inputs[0] if isinstance(inputs[0], dict) else None
         return first.get("path") if first else None
+
+    def _normalize_rtsp_url(self, rtsp_url: str) -> str:
+        host_override = settings.frigate_rtsp_host.strip()
+        if not host_override:
+            return rtsp_url
+
+        try:
+            parts = urlsplit(rtsp_url)
+        except Exception:
+            return rtsp_url
+
+        if parts.scheme not in ("rtsp", "rtsps") or not parts.netloc:
+            return rtsp_url
+
+        userinfo = None
+        hostport = parts.netloc
+        if "@" in parts.netloc:
+            userinfo, hostport = parts.netloc.rsplit("@", 1)
+
+        hostname = hostport
+        port = ""
+        if ":" in hostport:
+            hostname, port = hostport.rsplit(":", 1)
+
+        if hostname not in ("127.0.0.1", "localhost"):
+            return rtsp_url
+
+        new_hostport = host_override
+        if port:
+            new_hostport = f"{new_hostport}:{port}"
+
+        new_netloc = f"{userinfo}@{new_hostport}" if userinfo else new_hostport
+        return urlunsplit((parts.scheme, new_netloc, parts.path, parts.query, parts.fragment))
 
 
 frigate_client = FrigateClient()
