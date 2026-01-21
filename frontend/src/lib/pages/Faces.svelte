@@ -45,6 +45,9 @@
 
       total = response.total;
       hasMore = response.has_more;
+      if (reset) {
+        await loadKnownPeople();
+      }
     } catch (e) {
       console.error('Failed to load faces:', e);
     } finally {
@@ -58,6 +61,7 @@
     try {
       const knownOnly = filter === 'known';
       groupedData = await faces.getGrouped(knownOnly);
+      await loadKnownPeople();
     } catch (e) {
       console.error('Failed to load grouped faces:', e);
     } finally {
@@ -484,9 +488,6 @@
   <!-- Sidebar -->
   <div class="lg:col-span-1 space-y-6">
     <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
-      <FaceEventsPanel limit={15} />
-    </div>
-    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-semibold text-sm flex items-center gap-2">
           <Icon name="users" size={16} />
@@ -537,6 +538,9 @@
           {/each}
         {/if}
       </div>
+    </div>
+    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
+      <FaceEventsPanel limit={15} />
     </div>
   </div>
 </div>

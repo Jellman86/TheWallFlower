@@ -16,6 +16,7 @@
   let selectedStreamId = $state('');
   let recordDuration = $state(10);
   let isRecording = $state(false);
+  let groundTruthDraft = $state('');
   
   // New sample form
   let fileInput;
@@ -57,6 +58,9 @@
     if (selectedStreamId) {
       formData.append('stream_id', selectedStreamId);
     }
+    if (groundTruthDraft.trim()) {
+      formData.append('ground_truth', groundTruthDraft.trim());
+    }
     
     try {
       const res = await fetch(`${API_BASE}/samples`, {
@@ -67,6 +71,7 @@
         const newSample = await res.json();
         samples = [newSample, ...samples];
         fileInput.value = ''; // Reset
+        groundTruthDraft = '';
         selectSample(newSample);
       } else {
         alert('Upload failed');
@@ -87,11 +92,15 @@
       const res = await fetch(`${API_BASE}/streams/${selectedStreamId}/record`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ duration_seconds: Number(recordDuration) || 10 })
+        body: JSON.stringify({
+          duration_seconds: Number(recordDuration) || 10,
+          ground_truth: groundTruthDraft.trim() ? groundTruthDraft.trim() : null
+        })
       });
       if (res.ok) {
         const newSample = await res.json();
         samples = [newSample, ...samples];
+        groundTruthDraft = '';
         selectSample(newSample);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -252,6 +261,17 @@
             <option value={String(stream.id)}>{stream.name}</option>
           {/each}
         </select>
+      </div>
+      <div class="mt-3">
+        <label for="tuning-ground-truth" class="block text-xs font-medium text-[var(--color-text-muted)] mb-1">
+          Ground Truth for New Sample
+        </label>
+        <textarea
+          id="tuning-ground-truth"
+          bind:value={groundTruthDraft}
+          class="w-full h-20 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded p-2 text-xs focus:border-[var(--color-primary)] outline-none resize-none"
+          placeholder="Type what was said in the clip..."
+        ></textarea>
       </div>
       <p class="text-xs text-[var(--color-text-muted)] mt-2">
         Required: 16kHz Mono WAV (Float32 or PCM16)
