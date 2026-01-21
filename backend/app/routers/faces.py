@@ -114,7 +114,7 @@ def list_faces(
         "has_more": offset + len(items) < total
     }
 
-@router.get("/{face_id}", response_model=FaceRead)
+@router.get("/{face_id:int}", response_model=FaceRead)
 def get_face(face_id: int, session: Session = Depends(get_session)):
     """Get a specific face."""
     face = session.get(Face, face_id)
@@ -122,7 +122,7 @@ def get_face(face_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Face not found")
     return face
 
-@router.patch("/{face_id}", response_model=FaceRead)
+@router.patch("/{face_id:int}", response_model=FaceRead)
 def update_face(
     face_id: int, 
     name: str = Query(None),
@@ -145,7 +145,7 @@ def update_face(
     session.refresh(face)
     return face
 
-@router.delete("/{face_id}")
+@router.delete("/{face_id:int}")
 def delete_face(face_id: int, session: Session = Depends(get_session)):
     """Delete a face and its thumbnail."""
     face = session.get(Face, face_id)
@@ -170,7 +170,7 @@ def delete_face(face_id: int, session: Session = Depends(get_session)):
     session.commit()
     return {"status": "deleted", "id": face_id}
 
-@router.get("/{face_id}/embeddings", response_model=List[dict])
+@router.get("/{face_id:int}/embeddings", response_model=List[dict])
 def list_face_embeddings(
     face_id: int,
     session: Session = Depends(get_session)
@@ -492,7 +492,7 @@ def merge_faces(
     )
 
 
-@router.post("/{face_id}/assign/{target_name}", response_model=MergeFacesResponse)
+@router.post("/{face_id:int}/assign/{target_name}", response_model=MergeFacesResponse)
 def assign_face_to_existing(
     face_id: int,
     target_name: str,
