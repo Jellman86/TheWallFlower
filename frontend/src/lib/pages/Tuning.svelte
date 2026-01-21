@@ -14,6 +14,8 @@
   let isApplying = $state(false);
   let streamList = $state([]);
   let selectedStreamId = $state('');
+  let recordDuration = $state(10);
+  let isRecording = $state(false);
   
   // New sample form
   let fileInput;
@@ -73,6 +75,32 @@
       alert('Upload failed: ' + e.message);
     }
     isUploading = false;
+  }
+
+  async function handleRecord() {
+    if (!selectedStreamId) {
+      alert('Select a stream to record from');
+      return;
+    }
+    isRecording = true;
+    try {
+      const res = await fetch(`${API_BASE}/streams/${selectedStreamId}/record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration_seconds: Number(recordDuration) || 10 })
+      });
+      if (res.ok) {
+        const newSample = await res.json();
+        samples = [newSample, ...samples];
+        selectSample(newSample);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Record failed');
+      }
+    } catch (e) {
+      alert('Record failed: ' + e.message);
+    }
+    isRecording = false;
   }
 
   async function selectSample(sample) {
@@ -190,6 +218,26 @@
         >
             <Icon name={isUploading ? 'refresh' : 'plus'} size={16} class={isUploading ? 'animate-spin' : ''} />
             {isUploading ? 'Uploading...' : 'Upload .wav'}
+        </button>
+      </div>
+      <div class="mt-3 flex items-center gap-2">
+        <input
+          type="number"
+          min="2"
+          max="60"
+          step="1"
+          bind:value={recordDuration}
+          class="w-24 px-2 py-2 text-sm bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded"
+          aria-label="Record duration"
+        />
+        <span class="text-xs text-[var(--color-text-muted)]">seconds</span>
+        <button
+          onclick={handleRecord}
+          disabled={isRecording}
+          class="flex-1 py-2 bg-[var(--color-bg-hover)] rounded text-sm hover:bg-[var(--color-bg-dark)] flex items-center justify-center gap-2"
+        >
+          <Icon name={isRecording ? 'refresh' : 'mic'} size={16} class={isRecording ? 'animate-spin' : ''} />
+          {isRecording ? 'Recording...' : 'Record Sample'}
         </button>
       </div>
       <div class="mt-3">

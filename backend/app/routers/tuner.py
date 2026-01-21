@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 import uuid
 from typing import List, Optional
 
@@ -10,7 +11,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.db import get_session
-from app.models import TuningSample, TuningRun
+from app.models import TuningSample, TuningRun, StreamConfig
 from app.services.tuner_service import tuner_service, TUNING_DATA_DIR
 
 router = APIRouter(prefix="/tuning", tags=["tuning"])
@@ -53,6 +54,10 @@ class UpdateSampleRequest(BaseModel):
     ground_truth: Optional[str] = None
     stream_id: Optional[int] = None
 
+class RecordSampleRequest(BaseModel):
+    duration_seconds: float = 10.0
+    ground_truth: Optional[str] = None
+
 @router.put("/samples/{sample_id}", response_model=TuningSample)
 def update_sample(
     sample_id: int,
@@ -68,6 +73,67 @@ def update_sample(
         sample.ground_truth = request.ground_truth
     if request.stream_id is not None:
         sample.stream_id = request.stream_id
+    session.add(sample)
+    session.commit()
+    session.refresh(sample)
+    return sample
+
+@router.post("/streams/{stream_id}/record", response_model=TuningSample)
+def record_sample(
+    stream_id: int,
+    request: RecordSampleRequest,
+    session: Session = Depends(get_session)
+):
+    """Record a short sample from a live stream using ffmpeg."""
+    stream = session.get(StreamConfig, stream_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Stream not found")
+
+    duration = max(2.0, min(request.duration_seconds, 60.0))
+    filename = f"{uuid.uuid4()}.wav"
+    filepath = os.path.join(TUNING_DATA_DIR, filename)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        stream.rtsp_url,
+        "-t",
+        str(duration),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-f",
+        "wav",
+        filepath,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=int(duration) + 15,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Recording timed out")
+
+    if result.returncode != 0:
+        error_msg = result.stderr.decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=500, detail=f"ffmpeg failed: {error_msg[-500:]}")
+
+    sample = TuningSample(
+        filename=filename,
+        ground_truth=request.ground_truth,
+        stream_id=stream_id,
+        original_transcript=""
+    )
+
     session.add(sample)
     session.commit()
     session.refresh(sample)
