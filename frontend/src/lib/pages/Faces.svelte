@@ -15,6 +15,8 @@
   let hasMore = $state(false);
   let limit = 50;
   let isPretraining = $state(false);
+  let knownPeople = $state([]);
+  let isAssigning = $state(false);
 
   // Merge mode state
   let mergeMode = $state(false);
@@ -63,6 +65,15 @@
     }
   }
 
+  async function loadKnownPeople() {
+    try {
+      knownPeople = await faces.getKnownNames();
+    } catch (e) {
+      console.error('Failed to load known people:', e);
+      knownPeople = [];
+    }
+  }
+
   function handleLoadMore() {
     loadFaces(false);
   }
@@ -89,6 +100,29 @@
       alert('Failed to start pretrain scan');
     }
     isPretraining = false;
+  }
+
+  function handleDragStart(event, face) {
+    if (!face || face.is_known) return;
+    event.dataTransfer?.setData('text/plain', String(face.id));
+    event.dataTransfer?.setData('application/x-face-id', String(face.id));
+  }
+
+  async function handleDropOnKnown(event, targetName) {
+    event.preventDefault();
+    const faceId = event.dataTransfer?.getData('application/x-face-id')
+      || event.dataTransfer?.getData('text/plain');
+    if (!faceId) return;
+
+    isAssigning = true;
+    try {
+      await faces.assignToExisting(Number(faceId), targetName);
+      await loadFaces(true);
+      await loadKnownPeople();
+    } catch (e) {
+      alert('Assign failed: ' + (e.message || 'Unknown error'));
+    }
+    isAssigning = false;
   }
 
   function toggleFaceSelection(faceId) {
@@ -172,6 +206,10 @@
     } else {
       loadFaces(true);
     }
+  });
+
+  onMount(() => {
+    loadKnownPeople();
   });
 </script>
 
@@ -393,7 +431,11 @@
       {:else}
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {#each faceList as face (face.id)}
-            <div class="relative">
+            <div
+              class="relative"
+              draggable={!face.is_known}
+              ondragstart={(event) => handleDragStart(event, face)}
+            >
               {#if mergeMode}
                 <!-- Selection Overlay -->
                 <button
@@ -443,6 +485,58 @@
   <div class="lg:col-span-1 space-y-6">
     <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
       <FaceEventsPanel limit={15} />
+    </div>
+    <div class="bg-[var(--color-bg-card)] p-4 rounded-xl border border-[var(--color-border)] h-fit">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-sm flex items-center gap-2">
+          <Icon name="users" size={16} />
+          Known People
+        </h3>
+        <button
+          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          onclick={loadKnownPeople}
+          disabled={isAssigning}
+        >
+          Refresh
+        </button>
+      </div>
+      <p class="text-xs text-[var(--color-text-muted)] mb-3">
+        Drag an unknown face onto a person to train that identity.
+      </p>
+      <div class="space-y-2">
+        {#if knownPeople.length === 0}
+          <div class="text-xs text-[var(--color-text-muted)]">
+            No known people yet. Rename a face to create one.
+          </div>
+        {:else}
+          {#each knownPeople as person (person.face_id)}
+            <div
+              class="flex items-center gap-2 p-2 rounded border border-[var(--color-border)] bg-[var(--color-bg-dark)]/40 hover:bg-[var(--color-bg-hover)] transition-colors"
+              ondragover|preventDefault
+              ondrop={(event) => handleDropOnKnown(event, person.name)}
+            >
+              <div class="w-8 h-8 rounded-full overflow-hidden bg-[var(--color-bg-dark)] flex-shrink-0">
+                {#if person.thumbnail_path}
+                  <img
+                    src={faces.thumbnailUrl(person.face_id)}
+                    alt={person.name}
+                    class="w-full h-full object-cover"
+                  />
+                {:else}
+                  <div class="w-full h-full flex items-center justify-center">
+                    <Icon name="user" size={16} class="text-[var(--color-text-muted)]" />
+                  </div>
+                {/if}
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium truncate">{person.name}</p>
+                <p class="text-xs text-[var(--color-text-muted)]">{person.embedding_count} embeddings</p>
+              </div>
+              <Icon name="git-merge" size={14} class="text-[var(--color-primary)]" />
+            </div>
+          {/each}
+        {/if}
+      </div>
     </div>
   </div>
 </div>
