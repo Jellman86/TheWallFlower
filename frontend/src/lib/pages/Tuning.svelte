@@ -155,8 +155,11 @@
     
     <div class="flex-1 overflow-y-auto p-2 space-y-2">
       {#each samples as sample (sample.id)}
-        <button 
+        <div
+            role="button"
+            tabindex="0"
             onclick={() => selectSample(sample)}
+            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectSample(sample)}
             class="w-full text-left p-3 rounded hover:bg-[var(--color-bg-hover)] transition-colors border border-transparent
                    {selectedSample?.id === sample.id ? 'bg-[var(--color-bg-hover)] border-[var(--color-primary)]' : ''}"
         >
@@ -169,7 +172,7 @@
             <div class="text-xs text-[var(--color-text-muted)] mt-1">
                 {new Date(sample.created_at).toLocaleDateString()}
             </div>
-        </button>
+        </div>
       {/each}
       
       {#if samples.length === 0 && !isLoading}

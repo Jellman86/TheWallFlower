@@ -161,10 +161,12 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if isOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop"
+    role="button"
+    tabindex="0"
     onclick={handleBackdropClick}
+    onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleBackdropClick(e)}
   >
     <div class="bg-[var(--color-bg-card)] rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh] border border-[var(--color-border)] overflow-hidden">
       <!-- Header (sticky) -->
