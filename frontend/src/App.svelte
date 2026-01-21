@@ -302,6 +302,9 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between text-sm text-[var(--color-text-muted)]">
       <span title={versionInfo.git_hash !== "unknown" ? `Git: ${versionInfo.git_hash}` : ""}>
         TheWallflower v{version}
+        {#if versionInfo.git_hash !== "unknown"}
+          <span class="ml-1 text-[var(--color-text-muted)]">({versionInfo.git_hash})</span>
+        {/if}
       </span>
       <span>{streamList.length} stream{streamList.length !== 1 ? 's' : ''} configured</span>
     </div>
